@@ -1411,19 +1411,31 @@ class AudioToVideoApp:
             return
 
         self._stop = False
+        self._proc = None
         self.progress_var.set(0)
         self.lock_ui(True)
+
+        tasks = []
+        if plan.only_denoise:
+            tasks.append("仅降噪音频")
+        if plan.need_stt:
+            formats = " / ".join(
+                [name for name, on in (("SRT", plan.srt), ("TXT", plan.txt)) if on])
+            tasks.append(f"字幕({formats})")
+        if plan.mux_original:
+            tasks.append("原声配图 MP4")
+        if plan.mux_denoised:
+            tasks.append("降噪配图 MP4")
+
         self.log("=" * 64 + "\n")
-        if self.stt_var.get():
-            model_name = STT_MODELS.get(self.stt_model_var.get(), DEFAULT_STT_MODEL)
-            if not whisper_model_ready(model_name):
-                size_text = self.stt_model_var.get().split("（")[-1].split(" · ")[0]
-                self.log(f">>> ⏬ 首次使用 {model_name}，需先下载约 {size_text} 模型，"
-                         "耗时取决于网速。\n")
-            self.log(">>> 🎧 已启用字幕生成，降噪模式："
-                     f"{self.denoise_var.get()}。\n")
-        self.log(f">>> 🚀 开始批量转换，共 {len(self.audio_files)} 个文件。\n\n")
-        threading.Thread(target=self._worker, daemon=True).start()
+        self.log(f">>> 📂 输出目录：{plan.output_dir}\n")
+        self.log(f">>> 🧹 降噪：{self._denoise_desc(plan.denoise_mode)} · "
+                 f"🎧 识别模型：{plan.model_name or '关闭'}\n")
+        self.log(f">>> 🧾 本次任务：{' + '.join(tasks)}\n")
+        if plan.need_stt and not whisper_model_ready(plan.model_name):
+            self.log(f">>> ⏬ 首次使用 {plan.model_name}，需先下载模型权重，耗时取决于网速。\n")
+        self.log(f">>> 🚀 开始处理，共 {len(plan.audio_files)} 个文件。\n\n")
+        threading.Thread(target=self._worker, args=(plan,), daemon=True).start()
 
     def cancel_processing(self):
         self._stop = True
@@ -1436,55 +1448,69 @@ class AudioToVideoApp:
             except Exception:
                 pass
 
-    # ---------- 占位动作（阶段 2 接入真实逻辑） ----------
-    def start_subtitle_only(self):
-        msg = "该功能将在下一阶段接入，当前请使用「② 原声转 MP4」。"
-        self.log(f">>> {msg}\n")
-        messagebox.showinfo("功能开发中", msg)
+    def _set_proc(self, proc):
+        """ffmpeg 子进程句柄回调，取消按钮据此真正 terminate。"""
+        self._proc = proc
 
-    def start_denoised_mux(self):
-        msg = "该功能将在下一阶段接入，当前请使用「② 原声转 MP4」。"
-        self.log(f">>> {msg}\n")
-        messagebox.showinfo("功能开发中", msg)
+    # ---------- 工作线程 ----------
+    def _build_steps(self, plan):
+        """按实际需要的步骤动态分配 0-100 的进度区间。"""
+        raw = []
+        if plan.need_denoise:
+            raw.append(("降噪", 30))
+        if plan.need_stt:
+            raw.append(("语音识别", 40))
+        if plan.mux_original:
+            raw.append(("封装原声视频", 30))
+        if plan.mux_denoised:
+            raw.append(("封装降噪视频", 30))
+        total_weight = sum(weight for _, weight in raw) or 1
+        steps, cursor = [], 0.0
+        for name, weight in raw:
+            span = weight * 100.0 / total_weight
+            steps.append((name, cursor, cursor + span))
+            cursor += span
+        return steps
 
-    def _run_stt(self, audio_path, out_path, model_name, lang, denoise_mode,
-                 duration, index, total, base_name):
-        """降噪 + 转写 + 写出 SRT/TXT；任何异常都不影响后续视频渲染。"""
-        workdir = tempfile.mkdtemp(prefix="mp3tom4_asr_")
-        sub_base = os.path.splitext(out_path)[0]
+    def _do_stt(self, plan, asr_src, stem, duration, p_start, p_end):
+        """语音识别并按勾选写出 SRT / TXT；失败不影响后续步骤。"""
+        workdir = tempfile.mkdtemp(prefix="mp3tomp4_asr_")
         started = time.time()
         try:
-            if denoise_mode != "off":
-                self.set_stage(f"第 {index}/{total} 个 · {base_name} · 降噪")
-                self.log(f"  🧹 降噪中（{self.denoise_var.get()}）...\n")
-            else:
-                self.set_stage(f"第 {index}/{total} 个 · {base_name} · 音频预处理")
+            lang_text = plan.language or "自动检测"
+            self.log(f"  🎧 识别中（{plan.model_name} · {lang_text}）...\n")
+            # 降噪音频是 48k 成片音轨，这里统一重新解码成 ASR 需要的 16k 单声道
             asr_input = prepare_asr_audio(
-                self.ffmpeg_path, audio_path, denoise_mode, workdir, self.log)
+                self.ffmpeg_path, asr_src, "off", workdir, self.log)
             if not asr_input:
                 self.log("  ⚠ 音频预处理失败，跳过字幕生成。\n", is_error=True)
-                return
+                return False
             if self._stop:
-                return
+                return False
 
-            self.set_stage(f"第 {index}/{total} 个 · {base_name} · 语音识别")
-            self.log(f"  🎧 识别中（{model_name} · {self.stt_lang_var.get()}）...\n")
             segments, info = transcribe_audio(
-                asr_input, model_name, lang, duration,
-                on_progress=lambda p: self.set_progress(p * 0.7),
+                asr_input, plan.model_name, plan.language, duration,
+                on_progress=lambda p: self.set_progress(
+                    p_start + (p_end - p_start) * p / 100.0),
                 should_stop=lambda: self._stop,
                 log=self.log,
             )
             if self._stop:
-                return
+                return False
             if not segments:
                 self.log("  ⚠ 未识别到有效语音，未生成字幕。\n", is_error=True)
-                return
+                return False
 
-            srt_path = sub_base + ".srt"
-            txt_path = sub_base + ".txt"
-            write_srt(segments, srt_path)
-            write_txt(segments, txt_path)
+            produced = []
+            if plan.srt:
+                srt_path = unique_path(os.path.join(plan.output_dir, f"{stem}.srt"))
+                write_srt(segments, srt_path)
+                produced.append(os.path.basename(srt_path))
+            if plan.txt:
+                txt_path = unique_path(os.path.join(plan.output_dir, f"{stem}.txt"))
+                write_txt(segments, txt_path)
+                produced.append(os.path.basename(txt_path))
+
             lang_name = getattr(info, "language", "?")
             try:
                 prob = float(getattr(info, "language_probability", 0.0) or 0.0)
@@ -1493,96 +1519,147 @@ class AudioToVideoApp:
             self.log(
                 f"  ✅ 字幕已生成：{len(segments)} 条 · 语种 {lang_name} ({prob:.0%}) · "
                 f"耗时 {time.time() - started:.0f}s\n"
-                f"     → {os.path.basename(srt_path)} / {os.path.basename(txt_path)}\n"
+                f"     → {' / '.join(produced) if produced else '（未勾选格式）'}\n"
             )
+            return True
         except Exception as exc:
             self.log(f"  ❌ 语音识别失败：{exc}\n", is_error=True)
+            return False
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 
-    def _worker(self):
-        mode = SIZE_MODES.get(self.size_var.get(), DEFAULT_MODE)
-        stt_on = bool(self.stt_var.get())
-        model_name = STT_MODELS.get(self.stt_model_var.get(), DEFAULT_STT_MODEL)
-        lang = STT_LANGS.get(self.stt_lang_var.get(), DEFAULT_STT_LANG)
-        if lang == "auto":
-            lang = None
-        denoise_mode = DENOISE_MODES.get(self.denoise_var.get(), DEFAULT_DENOISE)
-        total = len(self.audio_files)
-        success = failed = 0
-
-        for index, audio_path in enumerate(self.audio_files, start=1):
-            if self._stop:
-                break
-            base_name = os.path.basename(audio_path)
-            stem = os.path.splitext(base_name)[0]
-            out_path = unique_path(os.path.join(self.output_dir, f"{stem}.mp4"))
-
-            self.set_stage(f"第 {index}/{total} 个 · {base_name}")
-            self.set_progress(0)
-            self.log(f"[{index}/{total}] {base_name}\n")
-
-            duration = probe_duration(self.ffmpeg_path, audio_path)
-            if duration <= 0:
-                self.log("  ⚠ 无法读取时长，进度条将不准确（不影响转换）。\n")
-
-            if stt_on and not self._stop:
-                self._run_stt(audio_path, out_path, model_name, lang, denoise_mode,
-                              duration, index, total, base_name)
-                self.set_progress(70.0)
-                self.set_stage(f"第 {index}/{total} 个 · {base_name} · 渲染视频")
-
-            if self._stop:
-                if os.path.exists(out_path):
-                    try:
-                        os.remove(out_path)
-                    except Exception:
-                        pass
-                self.log("  🛑 已取消。\n", is_error=True)
-                break
-
-            self._proc = None
-
-            def on_encode_progress(p, stt=stt_on):
-                self.set_progress(70.0 + p * 0.3 if stt else p)
-
-            rc, err = convert_one(
-                self.ffmpeg_path, audio_path, self.image_path, out_path, mode, duration,
-                on_progress=on_encode_progress,
-                should_stop=lambda: self._stop,
-            )
-
-            if self._stop:
-                if os.path.exists(out_path):
-                    try:
-                        os.remove(out_path)
-                    except Exception:
-                        pass
-                self.log("  🛑 已取消，已删除未完成的输出文件。\n", is_error=True)
-                break
-
-            if rc == 0 and os.path.exists(out_path):
-                success += 1
-                size_mb = os.path.getsize(out_path) / 1048576.0
-                self.log(f"  ✅ 成功: {os.path.basename(out_path)}  ({size_mb:.2f} MB)\n")
-            else:
-                failed += 1
-                detail = (err or "未知错误").splitlines()
-                detail_text = " | ".join(detail[-3:]) if detail else "未知错误"
-                self.log(f"  ❌ 失败: {detail_text[:400]}\n", is_error=True)
-            self.set_progress(100)
-
-        self.log("\n" + "=" * 64 + "\n")
+    def _mux_one(self, plan, audio_src, out_path, duration, p_start, p_end):
+        """封面 + 音频封装 MP4；取消或失败时删除半成品。"""
+        self.log(f"  🎬 封装视频：{os.path.basename(out_path)}\n")
+        rc, err = convert_one(
+            self.ffmpeg_path, audio_src, plan.image_path, out_path, plan.size_mode, duration,
+            on_progress=lambda p: self.set_progress(
+                p_start + (p_end - p_start) * p / 100.0),
+            should_stop=lambda: self._stop,
+            on_proc=self._set_proc,
+        )
         if self._stop:
-            self.log(f">>> 任务已取消。成功 {success} 个，失败 {failed} 个。\n")
-        else:
-            self.log(f">>> 🎉 批量任务完成：成功 {success} 个，失败 {failed} 个。\n")
-            self.log(f">>> 📂 输出目录: {self.output_dir}\n")
-            self.log(">>> 💡 下一步：打开 YouTube Studio 批量上传即可。\n")
+            remove_file_quiet(out_path)
+            self.log("  🛑 已取消，删除未完成的输出文件。\n", is_error=True)
+            return False
+        if rc == 0 and os.path.exists(out_path):
+            size_mb = os.path.getsize(out_path) / 1048576.0
+            self.log(f"  ✅ 成功：{os.path.basename(out_path)}（{size_mb:.2f} MB）\n")
+            return True
+        detail = (err or "未知错误").splitlines()
+        detail_text = " | ".join(detail[-3:]) if detail else "未知错误"
+        self.log(f"  ❌ 视频封装失败：{detail_text[:400]}\n", is_error=True)
+        remove_file_quiet(out_path)
+        return False
 
-        self._proc = None
-        self.set_stage("完成" if not self._stop else "已取消")
-        self.root.after(0, lambda: self.lock_ui(False))
+    def _worker(self, plan):
+        total = len(plan.audio_files)
+        steps = self._build_steps(plan)
+        success = failed = completed = 0
+        try:
+            for index, audio_path in enumerate(plan.audio_files, start=1):
+                if self._stop:
+                    break
+                base_name = os.path.basename(audio_path)
+                stem = os.path.splitext(base_name)[0]
+                self.set_progress(0)
+                self.log(f"[{index}/{total}] {base_name}\n")
+
+                duration = 0.0
+                if plan.need_stt or plan.mux_original or plan.mux_denoised:
+                    duration = probe_duration(self.ffmpeg_path, audio_path)
+                    if duration <= 0:
+                        self.log("  ⚠ 无法读取时长，进度条将不准确（不影响输出）。\n")
+
+                denoised_audio = ""
+                file_failed = False
+                cancelled = False
+
+                for step_index, (step_name, p_start, p_end) in enumerate(steps, start=1):
+                    if self._stop:
+                        cancelled = True
+                        break
+                    self.set_stage(
+                        f"第 {index}/{total} 个 · {base_name} · "
+                        f"正在{step_name}（{step_index}/{len(steps)}）")
+
+                    if step_name == "降噪":
+                        out_wav = unique_path(
+                            os.path.join(plan.output_dir, f"{stem}_denoised.wav"))
+                        self.log(f"  🧹 降噪中（{self._denoise_desc(plan.denoise_mode)}）...\n")
+                        ok = render_denoised_audio(
+                            self.ffmpeg_path, audio_path, out_wav, plan.denoise_mode,
+                            should_stop=lambda: self._stop,
+                            log=self.log,
+                            progress_cb=lambda p, a=p_start, b=p_end: self.set_progress(
+                                a + (b - a) * p / 100.0),
+                            on_proc=self._set_proc,
+                        )
+                        if not ok:
+                            if self._stop:
+                                cancelled = True
+                            else:
+                                self.log("  ❌ 降噪失败，跳过该文件。\n", is_error=True)
+                                file_failed = True
+                            break
+                        denoised_audio = out_wav
+                        self.log(f"  ✅ 降噪音频：{os.path.basename(out_wav)}\n")
+
+                    elif step_name == "语音识别":
+                        if not self._do_stt(plan, denoised_audio or audio_path,
+                                            stem, duration, p_start, p_end) and self._stop:
+                            cancelled = True
+                            break
+
+                    else:
+                        if step_name == "封装降噪视频":
+                            src_audio, suffix = denoised_audio, "_denoised"
+                        else:
+                            src_audio, suffix = audio_path, ""
+                        if not src_audio:
+                            self.log("  ⚠ 缺少降噪音频，跳过降噪视频。\n", is_error=True)
+                            continue
+                        out_path = unique_path(
+                            os.path.join(plan.output_dir, f"{stem}{suffix}.mp4"))
+                        if not self._mux_one(plan, src_audio, out_path,
+                                             duration, p_start, p_end):
+                            if self._stop:
+                                cancelled = True
+                                break
+                            file_failed = True
+                            break
+
+                    self.set_progress(p_end)
+
+                if cancelled:
+                    self.log("  🛑 已取消当前文件，跳过剩余任务。\n", is_error=True)
+                    break
+                if file_failed:
+                    failed += 1
+                else:
+                    success += 1
+                    completed += 1
+                self.set_progress(100)
+        except Exception:
+            import traceback
+
+            summary = "\n".join(traceback.format_exc().strip().splitlines()[-6:])
+            self.log(f">>> ❌ 任务异常终止：\n{summary}\n", is_error=True)
+        finally:
+            self._proc = None
+            self.log("\n" + "=" * 64 + "\n")
+            if self._stop:
+                self.log(f">>> 🛑 任务已取消：已完成 {completed}/{total} 个文件。\n",
+                         is_error=True)
+            else:
+                self.log(f">>> 🎉 批量任务完成：成功 {success} 个，失败 {failed} 个。\n")
+                self.log(f">>> 📂 输出目录：{plan.output_dir}\n")
+                self.log(">>> 💡 下一步：打开 YouTube Studio 批量上传即可。\n")
+            self.root.after(0, self._finish_ui)
+
+    def _finish_ui(self):
+        self.lock_ui(False)
+        self.stage_var.set("已取消" if self._stop else "完成")
 
 
 def main():
