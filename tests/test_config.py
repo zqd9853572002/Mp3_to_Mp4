@@ -4,12 +4,14 @@
 import json
 
 from mp3tom4 import config
+from mp3tom4.i18n import t
 
 
 def test_constants_complete():
     assert config.APP_NAME == "Mp3ToMp4"
     assert config.APP_VERSION
-    assert config.APP_TITLE
+    # 应用标题已外置为词条（config 不再持有中文字面量）
+    assert t("app.title")
 
     assert config.AUDIO_EXTS
     assert all(ext.startswith(".") for ext in config.AUDIO_EXTS)
@@ -18,12 +20,6 @@ def test_constants_complete():
     assert config.IMAGE_EXTS
     assert all(ext.startswith(".") for ext in config.IMAGE_EXTS)
 
-    assert config.AUDIO_FILETYPES[0][0] == "全部支持的音频"
-    assert "*" in config.AUDIO_FILETYPES[0][1]
-    assert config.AUDIO_FILETYPES[-1] == ("全部文件", "*.*")
-    assert config.IMAGE_FILETYPES[0][0] == "图片文件"
-    assert config.IMAGE_FILETYPES[-1] == ("全部文件", "*.*")
-
     assert config.DEFAULT_MODE == "1080p"
     assert config.DEFAULT_MODE in config.SIZE_TARGETS
     assert set(config.option_values(config.SIZE_OPTIONS)) == {"1080p", "720p", "orig"}
@@ -31,16 +27,16 @@ def test_constants_complete():
     assert config.SIZE_TARGETS["720p"] == (1280, 720)
 
     assert config.STT_OFF == "off"
-    assert ("off", "关闭（不识别）") in config.STT_MODEL_OPTIONS
+    assert ("off", "opt.model.off") in config.STT_MODEL_OPTIONS
     assert config.DEFAULT_STT_MODEL in config.option_values(config.STT_MODEL_OPTIONS)
     assert config.DEFAULT_STT_LANG in config.option_values(config.STT_LANG_OPTIONS)
     assert config.DEFAULT_DENOISE == "arnndn"
-    assert ("off", "关闭") in config.DENOISE_OPTIONS
+    assert ("off", "opt.denoise.off") in config.DENOISE_OPTIONS
     assert config.DEFAULT_DENOISE in config.option_values(config.DENOISE_OPTIONS)
 
 
 def test_option_tables_are_value_label_pairs():
-    """四组选项均为 (内部值, 显示文案)：内部值唯一、文案唯一、顺序稳定。"""
+    """四组选项均为 (内部值, 词条 key)：内部值唯一、key 唯一、顺序稳定。"""
     for options in (config.SIZE_OPTIONS, config.STT_MODEL_OPTIONS,
                     config.STT_LANG_OPTIONS, config.DENOISE_OPTIONS):
         assert all(isinstance(pair, tuple) and len(pair) == 2 for pair in options)
@@ -49,10 +45,12 @@ def test_option_tables_are_value_label_pairs():
         assert len(values) == len(set(values))
         assert len(labels) == len(set(labels))
         assert all(value and label for value, label in options)
+        # 文案列一律是 `opt.` 前缀的词条 key
+        assert all(label.startswith("opt.") for _value, label in options)
 
     # 选项集合与拆分前完全一致（不新增、不删除）
     assert config.option_labels(config.SIZE_OPTIONS) == [
-        "1080p (1920x1080)", "720p (1280x720)", "原图尺寸（仅偶数修正）"]
+        t("opt.size.1080p"), t("opt.size.720p"), t("opt.size.orig")]
     assert config.option_values(config.STT_MODEL_OPTIONS) == [
         "off", "large-v3-turbo", "medium", "small", "base", "tiny"]
     assert config.option_values(config.STT_LANG_OPTIONS) == ["auto", "zh", "en"]
@@ -61,12 +59,14 @@ def test_option_tables_are_value_label_pairs():
 
 def test_option_label_maps_internal_value():
     assert config.option_label(config.SIZE_OPTIONS, "720p") == "720p (1280x720)"
-    assert config.option_label(config.STT_MODEL_OPTIONS, "tiny") == "tiny（75 MB · 极速）"
+    assert config.option_label(
+        config.STT_MODEL_OPTIONS, "tiny") == t("opt.model.tiny")
     # 也容忍直接传入旧显示文案（旧配置迁移）
     assert config.option_label(config.DENOISE_OPTIONS, "关闭") == "关闭"
     # 无法识别时用默认值对应的文案
-    assert config.option_label(config.STT_MODEL_OPTIONS, "??",
-                               config.DEFAULT_STT_MODEL) == "large-v3-turbo（1.55 GB · 精度优先）"
+    assert config.option_label(
+        config.STT_MODEL_OPTIONS, "??", config.DEFAULT_STT_MODEL
+    ) == t("opt.model.large-v3-turbo")
 
 
 def test_resolve_option_accepts_internal_value_and_legacy_label():

@@ -18,6 +18,21 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "integration: 调用真实 ffmpeg 的集成用例")
 
 
+@pytest.fixture(autouse=True)
+def isolated_i18n(monkeypatch, tmp_path):
+    """每个用例都从「简体中文 + 空配置目录」起步。
+
+    i18n 的语言是进程级全局状态，且初始语言会读取用户配置；不隔离会让
+    用例之间互相影响，也会把测试写进真实的 %APPDATA% 目录。
+    """
+    from mp3tom4 import i18n
+
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    i18n.set_language("zh_CN", persist=False)
+    yield
+    i18n.set_language("zh_CN", persist=False)
+
+
 def _run(cmd):
     return subprocess.run(cmd, capture_output=True, text=True,
                           creationflags=ffmpeg_mod.NO_WINDOW)
