@@ -1,0 +1,104 @@
+name: Bug report
+description: Report a reproducible bug in mp3tom4 (MP3 to MP4 batch engine)
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report.
+        Please attach the log text copied from the app's log pane whenever possible.
+        （感谢反馈，请尽量附上界面日志区的完整日志。）
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description
+      description: What went wrong? Be as specific as you can.
+      placeholder: The video finished but no subtitle file was written...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact clicks / options that lead to the problem.
+      placeholder: |
+        1. Launch the app and pick a.mp3
+        2. Denoise = RNNoise, STT model = large-v3-turbo, check SRT
+        3. Click Start
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen instead?
+    validations:
+      required: false
+
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      description: Run `winver` and paste the version here.
+      placeholder: Windows 11 23H2 (22631.4169)
+    validations:
+      required: false
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+      placeholder: Python 3.12.7
+    validations:
+      required: false
+
+  - type: input
+    id: ffmpeg-version
+    attributes:
+      label: FFmpeg version
+      description: Paste the first line of `ffmpeg -version`.
+      placeholder: ffmpeg version 7.0.2-full_build-www.gyan.dev
+    validations:
+      required: false
+
+  - type: dropdown
+    id: ui-language
+    attributes:
+      label: UI language
+      description: Which interface language was active?
+      options:
+        - 简体中文
+        - 繁體中文
+        - English
+    validations:
+      required: false
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Stage where it failed
+      description: At which step did the problem appear?
+      options:
+        - 选择文件 (file selection)
+        - 识别字幕 (speech recognition / subtitles)
+        - 降噪 (denoising)
+        - 视频封装 (video muxing)
+        - 启动即崩溃 (crash on startup)
+        - 其他 (other)
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Copy the content of the log pane in the app (select all and copy).
+      render: text
+    validations:
+      required: false
