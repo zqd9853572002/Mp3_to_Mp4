@@ -51,6 +51,7 @@ import time
 import tkinter as tk
 import unicodedata
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
@@ -91,7 +92,9 @@ SIZE_TARGETS = {"1080p": (1920, 1080), "720p": (1280, 720)}
 DEFAULT_MODE = "1080p"
 
 # ---------- 语音识别 / 降噪 ----------
+STT_OFF = "off"
 STT_MODELS = {
+    "关闭（不识别）": STT_OFF,
     "large-v3-turbo（1.55 GB · 精度优先）": "large-v3-turbo",
     "medium（1.46 GB · 折中）": "medium",
     "small（464 MB · 速度快）": "small",
@@ -270,8 +273,13 @@ def unique_path(path: str) -> str:
         index += 1
 
 
-def convert_one(ffmpeg, audio_path, image_path, out_path, mode, duration, on_progress, should_stop):
-    """执行单个转换，返回 (returncode, stderr 文本)。"""
+def convert_one(ffmpeg, audio_path, image_path, out_path, mode, duration, on_progress, should_stop,
+                on_proc=None):
+    """执行单个转换，返回 (returncode, stderr 文本)。
+
+    on_proc 为可选回调：子进程启动时回调 Popen 句柄、结束时回调 None，
+    让 GUI 的取消按钮可以直接 terminate 真正的 ffmpeg 进程。
+    """
     cmd = [
         ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
         "-loop", "1", "-framerate", "1", "-i", image_path,
@@ -290,6 +298,8 @@ def convert_one(ffmpeg, audio_path, image_path, out_path, mode, duration, on_pro
         cmd, stdout=subprocess.PIPE, stderr=err_file,
         creationflags=NO_WINDOW, universal_newlines=True, bufsize=1,
     )
+    if on_proc is not None:
+        on_proc(proc)
     try:
         for line in proc.stdout:
             if should_stop():
@@ -311,6 +321,47 @@ def convert_one(ffmpeg, audio_path, image_path, out_path, mode, duration, on_pro
             proc.stdout.close()
         except Exception:
             pass
+        if on_proc is not None:
+            on_proc(None)
+
+    err_file.seek(0)
+    err_text = err_file.read().decode("utf-8", "replace").strip()
+    err_file.close()
+    return proc.returncode, err_text
+
+
+def run_ffmpeg_stream(cmd, duration, should_stop, on_progress=None, on_proc=None):
+    """执行 ffmpeg 命令并解析 -progress 输出，返回 (returncode, stderr 文本)。"""
+    err_file = tempfile.TemporaryFile(mode="w+b")
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=err_file,
+        creationflags=NO_WINDOW, universal_newlines=True, bufsize=1,
+    )
+    if on_proc is not None:
+        on_proc(proc)
+    try:
+        for line in proc.stdout:
+            if should_stop():
+                proc.terminate()
+                break
+            line = line.strip()
+            if line.startswith("out_time_us=") and on_progress and duration > 0:
+                value = line.split("=", 1)[1]
+                if value.lstrip("-").isdigit():
+                    on_progress(min(99.0, int(value) / 1_000_000.0 / duration * 100.0))
+        proc.wait()
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    finally:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+        if on_proc is not None:
+            on_proc(None)
 
     err_file.seek(0)
     err_text = err_file.read().decode("utf-8", "replace").strip()
@@ -525,6 +576,138 @@ def prepare_asr_audio(ffmpeg: str, src: str, mode: str, workdir: str, log=None) 
             log(f"    ⚠ 音频解码失败：{err.strip()[:200]}\n", True)
         return ""
     return out_wav
+
+
+# ==================== 任务计划 ====================
+@dataclass
+class JobPlan:
+    """主线程读取完所有 Tk 变量后打包出的纯数据任务计划。
+
+    工作线程只读这份快照，绝不再触碰任何 *_var，避免跨线程访问 Tk 对象。
+    """
+    audio_files: list
+    output_dir: str
+    image_path: str
+    size_mode: str
+    model_name: str | None
+    language: str | None
+    denoise_mode: str | None
+    srt: bool
+    txt: bool
+    mux_original: bool
+    mux_denoised: bool
+    need_stt: bool
+    need_denoise: bool
+    only_denoise: bool
+
+
+def remove_file_quiet(path: str) -> None:
+    """删除文件，失败也不抛异常。"""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
+def render_denoised_audio(ffmpeg, src, out_wav, mode, should_stop, log,
+                          progress_cb=None, on_proc=None) -> bool:
+    """把源音频降噪后渲染成 48kHz / 双声道 / 16bit WAV（成片专用）。
+
+    与 prepare_asr_audio 的关键区别：这里不做 16000Hz 单声道降采样，
+    成片音轨必须保留高频，否则听感会明显发闷。
+    """
+    if not mode or mode == "off":
+        return False
+
+    duration = probe_duration(ffmpeg, src)
+    tmp_out = str(Path(out_wav).with_suffix(".part.wav"))
+
+    def report(pct):
+        if progress_cb:
+            progress_cb(max(0.0, min(100.0, pct)))
+
+    def finish(code, err):
+        if code != 0 or not os.path.isfile(tmp_out):
+            remove_file_quiet(tmp_out)
+            if code != 0 and log and err:
+                last = [ln for ln in err.splitlines() if ln.strip()]
+                log(f"    ⚠ 降噪失败：{(last[-1] if last else '未知错误')[:200]}\n", True)
+            return False
+        try:
+            os.replace(tmp_out, out_wav)
+        except Exception as exc:
+            remove_file_quiet(tmp_out)
+            if log:
+                log(f"    ⚠ 降噪结果写入失败：{exc}\n", True)
+            return False
+        report(100.0)
+        return True
+
+    if mode == "gtcrn":
+        model_path = ensure_denoise_model("gtcrn", log)
+        if not model_path or not module_available("sherpa_onnx"):
+            if log:
+                log("    ⚠ 缺少 sherpa-onnx 或 GTCRN 模型，已自动回退 RNNoise。\n", True)
+            return render_denoised_audio(ffmpeg, src, out_wav, "arnndn",
+                                         should_stop, log, progress_cb, on_proc)
+        workdir = tempfile.mkdtemp(prefix="mp3tomp4_denoise_")
+        try:
+            if log:
+                log("    ℹ 强力降噪按 16k 单声道处理后再上采样到 48kHz，高频会有损失。\n")
+            base_wav = os.path.join(workdir, "decoded.wav")
+            ok, err = decode_to_wav(ffmpeg, src, base_wav)
+            if not ok:
+                if log:
+                    log(f"    ⚠ 音频解码失败：{err.strip()[:200]}\n", True)
+                return False
+            if should_stop():
+                return False
+            report(30.0)
+
+            den_wav = os.path.join(workdir, "denoised.wav")
+            if not _run_gtcrn(base_wav, den_wav, model_path, log):
+                if log:
+                    log("    ⚠ GTCRN 处理失败，已自动回退 RNNoise。\n", True)
+                return render_denoised_audio(ffmpeg, src, out_wav, "arnndn",
+                                             should_stop, log, progress_cb, on_proc)
+            report(60.0)
+            if should_stop():
+                return False
+
+            cmd = [
+                ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", den_wav,
+                "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le",
+                "-progress", "pipe:1", "-nostats", tmp_out,
+            ]
+            rc, err = run_ffmpeg_stream(
+                cmd, duration, should_stop, lambda p: report(60.0 + p * 0.4), on_proc)
+            if should_stop():
+                remove_file_quiet(tmp_out)
+                return False
+            return finish(rc, err)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    # 轻度：RNNoise，滤镜链保留 48kHz（末尾不再 aresample 到 16k）
+    model_path = ensure_denoise_model("arnndn", log)
+    chain = "highpass=f=80"
+    if model_path:
+        chain += ",aresample=48000,arnndn=m='" + filter_escape_path(model_path) + "'"
+    elif log:
+        log("    ⚠ RNNoise 模型不可用，本次仅做高通滤波。\n", True)
+    chain += ",aresample=48000"
+
+    cmd = [
+        ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", src,
+        "-af", chain, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le",
+        "-progress", "pipe:1", "-nostats", tmp_out,
+    ]
+    rc, err = run_ffmpeg_stream(cmd, duration, should_stop, report, on_proc)
+    if should_stop():
+        remove_file_quiet(tmp_out)
+        return False
+    return finish(rc, err)
 
 
 def get_whisper_model(model_name: str, log=None):
