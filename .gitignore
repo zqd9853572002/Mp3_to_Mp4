@@ -40,6 +40,7 @@ credentials.json
 # ---- 日志与临时文件 ----
 *.log
 *.tmp
+*.part
 *.bak
 ~$*
 .tmp_remote_probe/
@@ -57,6 +58,10 @@ htmlcov/
 *.srt
 *.txt
 !requirements.txt
+
+# ---- 模型权重（运行时下载，不入库）----
+*.onnx
+*.rnnn
 
 # 模型权重只存在 %APPDATA%\Mp3ToMp4\models，不进入仓库
 models/

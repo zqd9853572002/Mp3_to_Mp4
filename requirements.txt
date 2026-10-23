@@ -1,0 +1,19 @@
+# ============================================================
+# mp3tom4 依赖清单
+#   pip install -r requirements.txt            # 仅安装必需依赖
+#   pip install -r requirements.txt ".[full]" # 额外安装全部可选增强
+# ============================================================
+
+# ---------- 必需 ----------
+# 语音识别引擎（CTranslate2 推理后端），不装则「识别字幕」不可用
+faster-whisper>=1.0
+# 音频采样与重采样计算（faster-whisper 的内部依赖，此处显式声明避免被漏装）
+numpy>=1.24
+
+# ---------- 可选：强力降噪（GTCRN 神经网络降噪）----------
+# 不装时仍可使用内置的 RNNoise（ffmpeg arnndn）降噪
+# sherpa-onnx>=1.10
+
+# ---------- 可选：FFmpeg 兜底来源 ----------
+# 系统 PATH 中找不到 ffmpeg 时，从 imageio-ffmpeg 自带的二进制兜底
+# imageio-ffmpeg>=0.5

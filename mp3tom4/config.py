@@ -20,7 +20,7 @@ from pathlib import Path
 from .i18n import t, text_for
 
 APP_NAME = "Mp3ToMp4"
-APP_VERSION = "4.1"
+APP_VERSION = "5.0.0"
 
 # 项目根目录（原单文件脚本所在目录）：用于探测随程序放置的 ffmpeg.exe。
 # 原代码用 `Path(__file__).resolve().parent`，模块化后本文件位于 <根>/mp3tom4/，

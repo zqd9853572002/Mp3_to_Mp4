@@ -61,7 +61,8 @@ def test_build_video_filter_targets():
 
 
 def test_filter_escape_path():
-    assert fm.filter_escape_path(r"C:\Users\Z\bd.rnnn") == "C\\:/Users/Z/bd.rnnn"
+    # 用中性占位用户名，避免把本机真实路径写进仓库
+    assert fm.filter_escape_path(r"C:\Users\user\bd.rnnn") == "C\\:/Users/user/bd.rnnn"
 
 
 @pytest.mark.integration

@@ -2,9 +2,14 @@
 """config 模块：常量完整性、配置读写 round-trip、旧配置键兼容。"""
 
 import json
+from pathlib import Path
+
+import pytest
 
 from mp3tom4 import config
 from mp3tom4.i18n import t
+
+PYPROJECT = Path(config.__file__).resolve().parent.parent / "pyproject.toml"
 
 
 def test_constants_complete():
@@ -33,6 +38,14 @@ def test_constants_complete():
     assert config.DEFAULT_DENOISE == "arnndn"
     assert ("off", "opt.denoise.off") in config.DENOISE_OPTIONS
     assert config.DEFAULT_DENOISE in config.option_values(config.DENOISE_OPTIONS)
+
+
+def test_version_matches_pyproject():
+    """版本号单一来源：pyproject 的 version 必须与 config.APP_VERSION 一致。"""
+    tomllib = pytest.importorskip("tomllib")  # Python 3.11+ 才有标准库 tomllib
+    data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    assert data["project"]["version"] == config.APP_VERSION
+    assert config.APP_VERSION == "5.0.0"
 
 
 def test_option_tables_are_value_label_pairs():

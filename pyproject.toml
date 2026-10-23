@@ -1,0 +1,81 @@
+# -*- coding: utf-8 -*-
+# 打包与工具链配置（setuptools 后端）
+# 版本号唯一来源：mp3tom4/config.py 的 APP_VERSION，此处保持同步。
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mp3tom4"
+version = "5.0.0"
+requires-python = ">=3.10"
+description = "Batch audio-to-MP4 engine with subtitle generation, denoising and a trilingual Tkinter UI"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+keywords = ["ffmpeg", "mp4", "whisper", "speech-to-text", "denoise", "tkinter"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    # 许可证以 project.license 的 SPDX 表达式为准，不再使用已弃用的 license 分类器
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+
+# TODO(维护者): 取消注释并填入 GitHub 用户名与邮箱后发布。
+# authors = [
+#     { name = "<your-github-username>", email = "<you@example.com>" },
+# ]
+authors = []
+
+# 必需依赖：与 requirements.txt 的「必需」区块保持一致
+dependencies = [
+    "faster-whisper>=1.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# 可选增强：GTCRN 神经网络降噪 + imageio-ffmpeg 兜底二进制
+full = [
+    "sherpa-onnx>=1.10",
+    "imageio-ffmpeg>=0.5",
+]
+# 开发/测试：pytest 之外，pillow 用于界面截图
+dev = [
+    "pytest>=7.0",
+    "pillow>=9.0",
+]
+
+[project.scripts]
+mp3tom4 = "mp3tom4.app:main"
+
+[project.gui-scripts]
+mp3tom4-gui = "mp3tom4.app:main"
+
+# TODO(维护者): 取消注释并填入实际链接后发布。
+# [project.urls]
+# Homepage = "https://github.com/<your-github-username>/Py_Mp3_to_Mp4"
+# Source = "https://github.com/<your-github-username>/Py_Mp3_to_Mp4"
+# Issues = "https://github.com/<your-github-username>/Py_Mp3_to_Mp4/issues"
+# Changelog = "https://github.com/<your-github-username>/Py_Mp3_to_Mp4/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+include = ["mp3tom4*"]
+exclude = ["tests*", "Archive*"]
+
+# 关键：locale/*.json 是界面词条，不声明则 pip 安装后界面全变 key
+[tool.setuptools.package-data]
+mp3tom4 = ["locale/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: 调用真实 ffmpeg 的集成用例（可用 -m 'not integration' 跳过）",
+]
