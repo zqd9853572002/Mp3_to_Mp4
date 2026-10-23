@@ -16,7 +16,7 @@ BASE = dict(
     audio_files=["/tmp/a.mp3"],
     output_dir="/tmp/out",
     image_path="/tmp/cover.png",
-    size_label="720p (1280x720)",
+    size_mode="720p",
     model_code="tiny",
     denoise_code="off",
     lang_code="auto",
@@ -114,10 +114,15 @@ def test_plan_language_mapping():
     assert make_plan(lang_code="en").language == "en"
 
 
-def test_plan_size_label_mapping():
-    assert make_plan(size_label="1080p (1920x1080)").size_mode == "1080p"
-    assert make_plan(size_label="原图尺寸（仅偶数修正）").size_mode == "orig"
-    assert make_plan(size_label="不存在的模式").size_mode == "1080p"
+def test_plan_size_mode_mapping():
+    # 内部值直通
+    assert make_plan(size_mode="1080p").size_mode == "1080p"
+    assert make_plan(size_mode="orig").size_mode == "orig"
+    # 旧版显示文案仍可识别（向后兼容）
+    assert make_plan(size_mode="720p (1280x720)").size_mode == "720p"
+    assert make_plan(size_mode="原图尺寸（仅偶数修正）").size_mode == "orig"
+    # 无法识别时回退默认值
+    assert make_plan(size_mode="不存在的模式").size_mode == "1080p"
 
 
 def test_plan_keeps_ffmpeg_path():
@@ -249,7 +254,7 @@ def test_flow_1_txt_only(monkeypatch, ffmpeg_path, sine_audio, tmp_path):
     out_dir = _out_dir(tmp_path)
     plan = build_plan(
         audio_files=[sine_audio], output_dir=str(out_dir), image_path="",
-        size_label="720p (1280x720)", model_code="tiny", denoise_code="off",
+        size_mode="720p", model_code="tiny", denoise_code="off",
         lang_code="auto", srt=False, txt=True,
         mux_original=False, mux_denoised=False, ffmpeg_path=ffmpeg_path)
     assert plan.need_stt is True
@@ -276,7 +281,7 @@ def test_flow_2_original_mp4(ffmpeg_path, sine_audio, black_png, tmp_path):
     out_dir = _out_dir(tmp_path)
     plan = build_plan(
         audio_files=[sine_audio], output_dir=str(out_dir), image_path=black_png,
-        size_label="720p (1280x720)", model_code="off", denoise_code="off",
+        size_mode="720p", model_code="off", denoise_code="off",
         lang_code="auto", srt=False, txt=False,
         mux_original=True, mux_denoised=False, ffmpeg_path=ffmpeg_path)
     assert plan.need_denoise is False and plan.need_stt is False
@@ -296,7 +301,7 @@ def test_flow_3_denoise_and_denoised_mp4(ffmpeg_path, sine_audio, black_png,
     out_dir = _out_dir(tmp_path)
     plan = build_plan(
         audio_files=[sine_audio], output_dir=str(out_dir), image_path=black_png,
-        size_label="720p (1280x720)", model_code="off", denoise_code="arnndn",
+        size_mode="720p", model_code="off", denoise_code="arnndn",
         lang_code="auto", srt=False, txt=False,
         mux_original=False, mux_denoised=True, ffmpeg_path=ffmpeg_path)
     assert plan.need_denoise is True
@@ -322,7 +327,7 @@ def test_flow_4_both_mp4(ffmpeg_path, sine_audio, black_png, denoise_model, tmp_
     out_dir = _out_dir(tmp_path)
     plan = build_plan(
         audio_files=[sine_audio], output_dir=str(out_dir), image_path=black_png,
-        size_label="720p (1280x720)", model_code="off", denoise_code="arnndn",
+        size_mode="720p", model_code="off", denoise_code="arnndn",
         lang_code="auto", srt=False, txt=False,
         mux_original=True, mux_denoised=True, ffmpeg_path=ffmpeg_path)
 
@@ -342,7 +347,7 @@ def test_flow_5_only_denoise(ffmpeg_path, sine_audio, denoise_model, tmp_path):
     out_dir = _out_dir(tmp_path)
     plan = build_plan(
         audio_files=[sine_audio], output_dir=str(out_dir), image_path="",
-        size_label="720p (1280x720)", model_code="off", denoise_code="arnndn",
+        size_mode="720p", model_code="off", denoise_code="arnndn",
         lang_code="auto", srt=False, txt=False,
         mux_original=False, mux_denoised=False, ffmpeg_path=ffmpeg_path)
     assert plan.only_denoise is True

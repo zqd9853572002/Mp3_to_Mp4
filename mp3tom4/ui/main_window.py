@@ -21,14 +21,17 @@ from ..config import (
     DEFAULT_MODE,
     DEFAULT_STT_LANG,
     DEFAULT_STT_MODEL,
-    DENOISE_MODES,
+    DENOISE_OPTIONS,
     IMAGE_FILETYPES,
-    SIZE_MODES,
-    STT_LANGS,
-    STT_MODELS,
+    SIZE_OPTIONS,
+    STT_LANG_OPTIONS,
+    STT_MODEL_OPTIONS,
     legacy_subtitle_flags,
     load_config,
     module_available,
+    option_label,
+    option_labels,
+    resolve_option,
     save_config,
 )
 from ..ffmpeg import discover_ffmpeg, ffmpeg_info
@@ -40,8 +43,9 @@ class AudioToVideoApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(texts.WINDOW_TITLE.format(title=APP_TITLE, version=APP_VERSION))
-        self.root.geometry("980x940")
-        self.root.minsize(960, 900)
+        # 三组选项比原两组多占一行分组框，高度相应上调；日志区仍保持 height=10
+        self.root.geometry("980x1000")
+        self.root.minsize(960, 950)
         self.root.configure(bg="#1E1E1E")
 
         self.cfg = load_config()
@@ -53,20 +57,31 @@ class AudioToVideoApp:
         self._proc = None
         self._stop = False
         self._busy = False
+        # 初始化期间产生的配置告警，等日志控件创建后再统一输出
+        self._startup_warnings = []
+        # 下拉框注册表：combo -> (options, 显示文案变量, 内部值变量)
+        self._combos = {}
+        # 分组容器：标题 -> 内层 Frame（供联动与测试定位）
+        self.groups = {}
 
         # 旧配置（v4.0）只有一个 stt_enabled：等于「同时生成两种格式」
         srt_default, txt_default = legacy_subtitle_flags(self.cfg)
 
-        self.size_var = tk.StringVar(value=self._label_from_mode(self.cfg.get("size_mode", DEFAULT_MODE)))
+        # Tk 变量一律只存内部值；显示文案由下拉框自己的变量负责
+        self.size_var = tk.StringVar(value=self._init_option(
+            SIZE_OPTIONS, self.cfg.get("size_mode"), DEFAULT_MODE, texts.CAPTION_SIZE))
         self.progress_var = tk.DoubleVar(value=0.0)
         self.stage_var = tk.StringVar(value=texts.STAGE_READY)
 
-        self.stt_model_var = tk.StringVar(value=self._label_from_value(
-            STT_MODELS, self.cfg.get("stt_model", DEFAULT_STT_MODEL)))
-        self.stt_lang_var = tk.StringVar(value=self._label_from_value(
-            STT_LANGS, self.cfg.get("stt_language", DEFAULT_STT_LANG)))
-        self.denoise_var = tk.StringVar(value=self._label_from_value(
-            DENOISE_MODES, self.cfg.get("denoise_mode", DEFAULT_DENOISE)))
+        self.stt_model_var = tk.StringVar(value=self._init_option(
+            STT_MODEL_OPTIONS, self.cfg.get("stt_model"), DEFAULT_STT_MODEL,
+            texts.CAPTION_MODEL))
+        self.stt_lang_var = tk.StringVar(value=self._init_option(
+            STT_LANG_OPTIONS, self.cfg.get("stt_language"), DEFAULT_STT_LANG,
+            texts.CAPTION_LANG))
+        self.denoise_var = tk.StringVar(value=self._init_option(
+            DENOISE_OPTIONS, self.cfg.get("denoise_mode"), DEFAULT_DENOISE,
+            texts.CAPTION_DENOISE))
         self.srt_var = tk.BooleanVar(value=srt_default)
         self.txt_var = tk.BooleanVar(value=txt_default)
         self.mux_original_var = tk.BooleanVar(value=bool(self.cfg.get("mux_original", False)))
@@ -77,29 +92,55 @@ class AudioToVideoApp:
         self.root.after(100, self.refresh_ffmpeg)
 
     # ---------- 配置辅助 ----------
-    @staticmethod
-    def _label_from_mode(mode: str) -> str:
-        for label, value in SIZE_MODES.items():
-            if value == mode:
-                return label
-        return next(k for k, v in SIZE_MODES.items() if v == DEFAULT_MODE)
+    def _init_option(self, options, raw, default, name) -> str:
+        """读取配置里的选项值：兼容旧中文文案，无法识别时回退默认值并记账。"""
+        value, recognized = resolve_option(options, raw, default)
+        if not recognized:
+            self._startup_warnings.append(texts.LOG_CONFIG_FALLBACK.format(
+                name=name, raw=raw, value=value))
+        return value
 
-    @staticmethod
-    def _label_from_value(mapping: dict, value) -> str:
-        for label, val in mapping.items():
-            if val == value:
-                return label
-        return next(iter(mapping))
+    def _make_combo(self, parent, options, value_var, width):
+        """创建「内部值 ↔ 显示文案」分离的下拉框。
+
+        `value_var` 始终保存内部值，下拉框自身绑定另一套显示文案变量。
+        """
+        display_var = tk.StringVar(value=option_label(options, value_var.get()))
+        combo = ttk.Combobox(parent, textvariable=display_var, state="readonly",
+                             values=option_labels(options), width=width,
+                             font=("Microsoft YaHei", 9))
+        combo.bind("<<ComboboxSelected>>", lambda _event: self._on_option_pick(combo))
+        self._combos[combo] = (options, display_var, value_var)
+        return combo
+
+    def _on_option_pick(self, combo):
+        """用户在下拉框里选了新文案 → 换算成内部值后再触发联动。"""
+        options, display_var, value_var = self._combos[combo]
+        value, _recognized = resolve_option(options, display_var.get(), value_var.get())
+        value_var.set(value)
+        self._on_option_change()
+
+    def set_option(self, combo, value):
+        """以**内部值**程序化设置下拉框（界面与测试共用同一入口）。"""
+        options, display_var, value_var = self._combos[combo]
+        value, _recognized = resolve_option(options, value, value_var.get())
+        display_var.set(option_label(options, value))
+        value_var.set(value)
+        self._on_option_change()
 
     def _persist(self):
         self.cfg.update({
             "ffmpeg_path": self.ffmpeg_path,
             "image_path": self.image_path,
             "output_dir": self.output_dir,
-            "size_mode": SIZE_MODES.get(self.size_var.get(), DEFAULT_MODE),
-            "stt_model": STT_MODELS.get(self.stt_model_var.get(), DEFAULT_STT_MODEL),
-            "stt_language": STT_LANGS.get(self.stt_lang_var.get(), DEFAULT_STT_LANG),
-            "denoise_mode": DENOISE_MODES.get(self.denoise_var.get(), DEFAULT_DENOISE),
+            # 一律写内部值，避免界面文案变化导致旧配置失效
+            "size_mode": resolve_option(SIZE_OPTIONS, self.size_var.get(), DEFAULT_MODE)[0],
+            "stt_model": resolve_option(
+                STT_MODEL_OPTIONS, self.stt_model_var.get(), DEFAULT_STT_MODEL)[0],
+            "stt_language": resolve_option(
+                STT_LANG_OPTIONS, self.stt_lang_var.get(), DEFAULT_STT_LANG)[0],
+            "denoise_mode": resolve_option(
+                DENOISE_OPTIONS, self.denoise_var.get(), DEFAULT_DENOISE)[0],
             "srt_enabled": bool(self.srt_var.get()),
             "txt_enabled": bool(self.txt_var.get()),
             "mux_original": bool(self.mux_original_var.get()),
@@ -118,8 +159,10 @@ class AudioToVideoApp:
     def _option_flags(self):
         """把界面选项折算成「本次要做什么」的布尔组合（不触碰工作线程）。"""
         return option_flags(
-            STT_MODELS.get(self.stt_model_var.get(), DEFAULT_STT_MODEL),
-            DENOISE_MODES.get(self.denoise_var.get(), DEFAULT_DENOISE),
+            resolve_option(STT_MODEL_OPTIONS, self.stt_model_var.get(),
+                           DEFAULT_STT_MODEL)[0],
+            resolve_option(DENOISE_OPTIONS, self.denoise_var.get(),
+                           DEFAULT_DENOISE)[0],
             self.srt_var.get(),
             self.txt_var.get(),
             self.mux_original_var.get(),
@@ -195,8 +238,10 @@ class AudioToVideoApp:
 
     # ---------- 界面 ----------
     def _group(self, title):
-        """带边框的分组容器，返回可放行的内层 Frame。"""
-        return widgets.group(self.root, title)
+        """带边框的分组容器，返回可放行的内层 Frame（同时登记到 self.groups）。"""
+        inner = widgets.group(self.root, title)
+        self.groups[title] = inner
+        return inner
 
     @staticmethod
     def _row(parent):
@@ -242,31 +287,27 @@ class AudioToVideoApp:
                                   font=("Microsoft YaHei", 9), anchor="w")
         self.lbl_audio.pack(side="left", padx=12)
 
-        # --- 选项 A · 音频与文字 ---
+        # --- 选项 A · 降噪 ---
         grp_a = self._group(texts.GROUP_OPTIONS_A)
         row = self._row(grp_a)
         self._caption(row, texts.CAPTION_DENOISE).pack(side="left")
-        self.cmb_denoise = ttk.Combobox(row, textvariable=self.denoise_var, state="readonly",
-                                        values=list(DENOISE_MODES.keys()), width=22,
-                                        font=("Microsoft YaHei", 9))
+        self.cmb_denoise = self._make_combo(row, DENOISE_OPTIONS, self.denoise_var,
+                                            width=22)
         self.cmb_denoise.pack(side="left")
-        self.cmb_denoise.bind("<<ComboboxSelected>>", self._on_option_change)
 
-        row = self._row(grp_a)
+        # --- 选项 B · 识别与字幕 ---
+        grp_b = self._group(texts.GROUP_OPTIONS_B)
+        row = self._row(grp_b)
         self._caption(row, texts.CAPTION_MODEL).pack(side="left")
-        self.cmb_model = ttk.Combobox(row, textvariable=self.stt_model_var, state="readonly",
-                                      values=list(STT_MODELS.keys()), width=30,
-                                      font=("Microsoft YaHei", 9))
+        self.cmb_model = self._make_combo(row, STT_MODEL_OPTIONS, self.stt_model_var,
+                                          width=30)
         self.cmb_model.pack(side="left", padx=(0, 18))
-        self.cmb_model.bind("<<ComboboxSelected>>", self._on_option_change)
         self._caption(row, texts.CAPTION_LANG).pack(side="left")
-        self.cmb_lang = ttk.Combobox(row, textvariable=self.stt_lang_var, state="readonly",
-                                     values=list(STT_LANGS.keys()), width=16,
-                                     font=("Microsoft YaHei", 9))
+        self.cmb_lang = self._make_combo(row, STT_LANG_OPTIONS, self.stt_lang_var,
+                                         width=16)
         self.cmb_lang.pack(side="left")
-        self.cmb_lang.bind("<<ComboboxSelected>>", self._on_option_change)
 
-        row = self._row(grp_a)
+        row = self._row(grp_b)
         self._caption(row, texts.CAPTION_SUBTITLE).pack(side="left")
         self.chk_srt = widgets.checkbutton(row, texts.CHK_SRT, self.srt_var,
                                            command=self._on_option_change)
@@ -275,21 +316,21 @@ class AudioToVideoApp:
                                            command=self._on_option_change)
         self.chk_txt.pack(side="left", padx=(16, 0))
 
-        # --- 选项 B · 视频生成 ---
-        grp_b = self._group(texts.GROUP_OPTIONS_B)
-        row = self._row(grp_b)
+        # --- 选项 C · 视频生成 ---
+        grp_c = self._group(texts.GROUP_OPTIONS_C)
+        row = self._row(grp_c)
         self.chk_mux_original = widgets.checkbutton(
             row, texts.CHK_MUX_ORIGINAL, self.mux_original_var,
             command=self._on_option_change)
         self.chk_mux_original.pack(side="left")
 
-        row = self._row(grp_b)
+        row = self._row(grp_c)
         self.chk_mux_denoised = widgets.checkbutton(
             row, texts.CHK_MUX_DENOISED, self.mux_denoised_var,
             command=self._on_option_change)
         self.chk_mux_denoised.pack(side="left")
 
-        row = self._row(grp_b)
+        row = self._row(grp_c)
         self._caption(row, texts.CAPTION_COVER).pack(side="left")
         self.btn_img = tk.Button(row, text=texts.BTN_SELECT_COVER,
                                  font=("Microsoft YaHei", 9, "bold"),
@@ -301,13 +342,10 @@ class AudioToVideoApp:
                                 font=("Microsoft YaHei", 9), anchor="w")
         self.lbl_img.pack(side="left", padx=12)
 
-        row = self._row(grp_b)
+        row = self._row(grp_c)
         self._caption(row, texts.CAPTION_SIZE).pack(side="left")
-        self.cmb_size = ttk.Combobox(row, textvariable=self.size_var, state="readonly",
-                                     values=list(SIZE_MODES.keys()), width=24,
-                                     font=("Microsoft YaHei", 9))
+        self.cmb_size = self._make_combo(row, SIZE_OPTIONS, self.size_var, width=24)
         self.cmb_size.pack(side="left")
-        self.cmb_size.bind("<<ComboboxSelected>>", self._on_option_change)
         tk.Label(row, text=texts.LBL_SIZE_HINT, bg="#252526", fg="#777777",
                  font=("Microsoft YaHei", 8)).pack(side="left", padx=10)
 
@@ -376,6 +414,10 @@ class AudioToVideoApp:
             self.log(texts.LOG_DENOISE_READY)
         else:
             self.log(texts.LOG_DENOISE_PARTIAL)
+        # 初始化阶段记录的配置回退告警（此时日志控件已就绪）
+        for warning in self._startup_warnings:
+            self.log(warning, is_error=True)
+        self._startup_warnings.clear()
         self._sync_options()
 
     # ---------- 日志 / 进度 ----------
@@ -507,15 +549,18 @@ class AudioToVideoApp:
             self._sync_options()
 
     def _build_plan(self):
-        """在主线程一次性读完全部 Tk 变量，打包成 JobPlan 交给工作线程。"""
+        """在主线程一次性读完全部 Tk 变量，打包成 JobPlan 交给工作线程。
+
+        Tk 变量里存的是内部值，这里直接透传，不再做文案 → 值反查。
+        """
         return build_plan(
             audio_files=self.audio_files,
             output_dir=self.output_dir,
             image_path=self.image_path,
-            size_label=self.size_var.get(),
-            model_code=STT_MODELS.get(self.stt_model_var.get(), DEFAULT_STT_MODEL),
-            denoise_code=DENOISE_MODES.get(self.denoise_var.get(), DEFAULT_DENOISE),
-            lang_code=STT_LANGS.get(self.stt_lang_var.get(), DEFAULT_STT_LANG),
+            size_mode=self.size_var.get(),
+            model_code=self.stt_model_var.get(),
+            denoise_code=self.denoise_var.get(),
+            lang_code=self.stt_lang_var.get(),
             srt=bool(self.srt_var.get()),
             txt=bool(self.txt_var.get()),
             mux_original=bool(self.mux_original_var.get()),

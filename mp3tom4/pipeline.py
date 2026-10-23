@@ -15,16 +15,13 @@ from dataclasses import dataclass
 
 from .asr import transcribe_audio
 from .config import (
-    DEFAULT_DENOISE,
     DEFAULT_MODE,
-    DEFAULT_STT_LANG,
-    DEFAULT_STT_MODEL,
-    DENOISE_MODES,
-    SIZE_MODES,
-    STT_LANGS,
-    STT_MODELS,
+    DENOISE_OPTIONS,
+    SIZE_OPTIONS,
     STT_OFF,
+    option_label,
     remove_file_quiet,
+    resolve_option,
 )
 from .denoise import prepare_asr_audio, render_denoised_audio
 from .ffmpeg import convert_one, probe_duration, unique_path
@@ -94,9 +91,10 @@ class JobPlan:
 
 
 def denoise_desc(mode):
-    if not mode:
+    """降噪内部值 → 显示文案（仅用于日志/提示，不参与逻辑判断）。"""
+    if not mode or mode == "off":
         return TXT_DENOISE_OFF
-    return {v: k for k, v in DENOISE_MODES.items()}.get(mode, mode)
+    return option_label(DENOISE_OPTIONS, mode)
 
 
 def option_flags(model_code, denoise_code, srt, txt, mux_original, mux_denoised):
@@ -118,9 +116,13 @@ def option_flags(model_code, denoise_code, srt, txt, mux_original, mux_denoised)
     }
 
 
-def build_plan(*, audio_files, output_dir, image_path, size_label, model_code, denoise_code,
+def build_plan(*, audio_files, output_dir, image_path, size_mode, model_code, denoise_code,
                lang_code, srt, txt, mux_original, mux_denoised, ffmpeg_path=""):
-    """由纯值（非 Tk 变量）构造 JobPlan，供 UI 在主线程调用。"""
+    """由纯值（非 Tk 变量）构造 JobPlan，供 UI 在主线程调用。
+
+    所有 “*_mode / *_code” 参数均为**内部值**；`size_mode` 额外兼容旧版中文
+    显示文案，避免旧配置在升级瞬间失效。
+    """
     model_name = None if model_code == STT_OFF else model_code
     denoise_mode = None if denoise_code == "off" else denoise_code
     language = None if lang_code == "auto" else lang_code
@@ -140,7 +142,7 @@ def build_plan(*, audio_files, output_dir, image_path, size_label, model_code, d
         audio_files=list(audio_files),
         output_dir=output_dir,
         image_path=image_path,
-        size_mode=SIZE_MODES.get(size_label, DEFAULT_MODE),
+        size_mode=resolve_option(SIZE_OPTIONS, size_mode, DEFAULT_MODE)[0],
         model_name=model_name,
         language=language,
         denoise_mode=denoise_mode,

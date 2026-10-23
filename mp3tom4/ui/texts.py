@@ -18,9 +18,11 @@ BTN_ENGINE_CHANGE = "更换"
 BTN_ENGINE_REDETECT = "重新检测"
 
 # ---------- 分组标题 ----------
+# 三组选项职责单一：A 只管降噪，B 只管识别与字幕，C 只管视频输出。
 GROUP_INPUT = "输入音频"
-GROUP_OPTIONS_A = "选项 A · 音频与文字"
-GROUP_OPTIONS_B = "选项 B · 视频生成"
+GROUP_OPTIONS_A = "选项 A · 降噪"
+GROUP_OPTIONS_B = "选项 B · 识别与字幕"
+GROUP_OPTIONS_C = "选项 C · 视频生成"
 GROUP_OUTPUT = "输出目录"
 
 # ---------- 输入音频 ----------
@@ -28,15 +30,17 @@ CAPTION_AUDIO = "音频"
 BTN_SELECT_AUDIO = "选择音频"
 TXT_AUDIO_SELECTED = "已选中 {count} 个音频"
 
-# ---------- 选项 A · 音频与文字 ----------
+# ---------- 选项 A · 降噪 ----------
 CAPTION_DENOISE = "降噪"
+
+# ---------- 选项 B · 识别与字幕 ----------
 CAPTION_MODEL = "识别模型"
 CAPTION_LANG = "识别语种"
 CAPTION_SUBTITLE = "生成字幕"
 CHK_SRT = "SRT"
 CHK_TXT = "TXT"
 
-# ---------- 选项 B · 视频生成 ----------
+# ---------- 选项 C · 视频生成 ----------
 CHK_MUX_ORIGINAL = "原始音频配图 MP4"
 CHK_MUX_DENOISED = "降噪音频配图 MP4"
 CAPTION_COVER = "封面"
@@ -123,4 +127,5 @@ LOG_TASKS = ">>> 🧾 本次任务：{tasks}\n"
 LOG_FIRST_MODEL = ">>> ⏬ 首次使用 {model}，需先下载模型权重，耗时取决于网速。\n"
 LOG_START = ">>> 🚀 开始处理，共 {count} 个文件。\n\n"
 LOG_CANCEL_REQUEST = ">>> 🛑 已请求取消，正在停止当前任务...\n"
+LOG_CONFIG_FALLBACK = ">>> ⚠ 配置项「{name}」的值「{raw}」无法识别，已回退为 {value}。\n"
 TXT_MODEL_OFF = "关闭"

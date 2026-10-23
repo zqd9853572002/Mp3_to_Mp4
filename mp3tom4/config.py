@@ -39,37 +39,83 @@ IMAGE_FILETYPES = [
     ("全部文件", "*.*"),
 ]
 
-SIZE_MODES = {
-    "1080p (1920x1080)": "1080p",
-    "720p (1280x720)": "720p",
-    "原图尺寸（仅偶数修正）": "orig",
-}
+# ---------- 选项表：内部值 ↔ 显示文案 ----------
+# 所有下拉框的「值」与「文案」在此分离：
+#   * 配置文件、任务计划一律使用内部值（二元组左侧），跨版本稳定；
+#   * 界面只渲染右侧文案，未来做多语言时只需替换文案列。
+SIZE_OPTIONS = [
+    ("1080p", "1080p (1920x1080)"),
+    ("720p", "720p (1280x720)"),
+    ("orig", "原图尺寸（仅偶数修正）"),
+]
+STT_MODEL_OPTIONS = [
+    ("off", "关闭（不识别）"),
+    ("large-v3-turbo", "large-v3-turbo（1.55 GB · 精度优先）"),
+    ("medium", "medium（1.46 GB · 折中）"),
+    ("small", "small（464 MB · 速度快）"),
+    ("base", "base（141 MB · 轻量）"),
+    ("tiny", "tiny（75 MB · 极速）"),
+]
+STT_LANG_OPTIONS = [
+    ("auto", "自动检测（中英混合）"),
+    ("zh", "中文"),
+    ("en", "英文"),
+]
+DENOISE_OPTIONS = [
+    ("off", "关闭"),
+    ("arnndn", "轻度 · RNNoise（推荐）"),
+    ("gtcrn", "强力 · GTCRN（神经网络）"),
+]
+
 SIZE_TARGETS = {"1080p": (1920, 1080), "720p": (1280, 720)}
 DEFAULT_MODE = "1080p"
 
 # ---------- 语音识别 / 降噪 ----------
 STT_OFF = "off"
-STT_MODELS = {
-    "关闭（不识别）": STT_OFF,
-    "large-v3-turbo（1.55 GB · 精度优先）": "large-v3-turbo",
-    "medium（1.46 GB · 折中）": "medium",
-    "small（464 MB · 速度快）": "small",
-    "base（141 MB · 轻量）": "base",
-    "tiny（75 MB · 极速）": "tiny",
-}
-STT_LANGS = {
-    "自动检测（中英混合）": "auto",
-    "中文": "zh",
-    "英文": "en",
-}
-DENOISE_MODES = {
-    "关闭": "off",
-    "轻度 · RNNoise（推荐）": "arnndn",
-    "强力 · GTCRN（神经网络）": "gtcrn",
-}
 DEFAULT_STT_MODEL = "large-v3-turbo"
 DEFAULT_STT_LANG = "auto"
 DEFAULT_DENOISE = "arnndn"
+
+
+def option_values(options):
+    """选项表的全部内部值（按显示顺序）。"""
+    return [value for value, _label in options]
+
+
+def option_labels(options):
+    """选项表的全部显示文案（按显示顺序）。"""
+    return [label for _value, label in options]
+
+
+def option_label(options, value, default_value=None):
+    """内部值 → 显示文案。
+
+    同时容忍直接传入旧版显示文案（旧配置迁移场景）。无法识别时使用
+    `default_value` 对应的文案，缺省取该组第一项。
+    """
+    for val, label in options:
+        if value == val or value == label:
+            return label
+    fallback = default_value if default_value is not None else options[0][0]
+    for val, label in options:
+        if val == fallback:
+            return label
+    return options[0][1]
+
+
+def resolve_option(options, raw, default):
+    """把配置/界面取到的值解析成内部值，返回 ``(内部值, 是否被识别)``。
+
+    接受内部值，也接受旧版中文显示文案；无法识别时回退到 ``default``
+    （明确指定的默认值，而不是该组第一项）。``raw`` 为空视为「未配置」，
+    返回默认值且不视为异常。
+    """
+    if raw is None or raw == "":
+        return default, True
+    for value, label in options:
+        if raw == value or raw == label:
+            return value, True
+    return default, False
 
 RNNOISE_URL = "https://raw.githubusercontent.com/richardpl/arnndn-models/master/bd.rnnn"
 GTCRN_URL = (
