@@ -49,4 +49,17 @@ credentials.json
 Thumbs.db
 desktop.ini
 
+# ---- 开发 / 测试产物 ----
+.pytest_cache/
+.coverage
+htmlcov/
+*.spec
+*.srt
+*.txt
+!requirements.txt
+
+# 模型权重只存在 %APPDATA%\Mp3ToMp4\models，不进入仓库
+models/
+
+# 注意：Black.png 与 README.MD 必须保留，不要误伤
 # 注意：.vscode/settings.json 已被远程仓库跟踪，请勿忽略
