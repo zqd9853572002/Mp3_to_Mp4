@@ -1,0 +1,52 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- 运行产物（音视频输入/输出）----
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.avi
+*.mkv
+*.aac
+output/
+out/
+
+# ---- 环境与密钥（安全）----
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+*secret*
+*_token*
+*id_rsa*
+
+# ---- 日志与临时文件 ----
+*.log
+*.tmp
+*.bak
+~$*
+.tmp_remote_probe/
+
+# ---- 操作系统 / 编辑器杂项 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 注意：.vscode/settings.json 已被远程仓库跟踪，请勿忽略

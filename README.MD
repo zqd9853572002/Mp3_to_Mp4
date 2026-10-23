@@ -42,7 +42,26 @@
     - **步骤 4**: 点击 **"4. ▶ 开始极速渲染生成 MP4"** 按钮，启动转换任务。
 4.  等待处理完成。您可以在界面下方的日志区查看每个文件的处理状态。任务结束后，前往您指定的输出文件夹即可找到所有生成的 MP4 文件。
 
-## 📝 开发日志 (Changelog)
+## 📁 项目结构
+
+```
+Py_Mp3_to_Mp4/
+├── MP3toMP4.py            # 主程序（Tkinter GUI + MoviePy 转换引擎）
+├── Black.png              # 纯黑背景占位图（9×8，内置默认底图）
+├── README.MD              # 项目说明与开发日志
+├── .gitignore             # 版本库忽略规则（运行产物、虚拟环境、密钥等）
+├── .vscode/
+│   └── settings.json      # 编辑器配置
+└── Archive/
+    └── MP3toMP4.py        # 历史归档版本（v2.1 早期快照，仅供追溯，不参与运行）
+```
+
+> 说明：版本变更记录统一维护在本 README 的「开发日志 (Changelog)」章节，不单独建立 `CHANGELOG.md`，避免多份记录不同步。
+
+##  开发日志 (Changelog)
+
+### 仓库维护（Docs）
+- **结构规范化**: 新增 `.gitignore`；历史版本归档至 `Archive/`；README 补充「项目结构」说明。
 
 ### v2.1 (MoviePy 2.x 适配版)
 - **语法重构**: 完美适配 MoviePy v2.0+ 最新版 API。将废弃的 `set_duration` 和 `set_audio` 替换为全新的 `with_duration` 和 `with_audio` 链式调用方法，彻底解决 Attribute 报错崩溃问题。
