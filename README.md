@@ -1,212 +1,189 @@
-# 极速音频转 MP4 批量引擎 (YouTube 音频存档专用)
+# Mp3 to MP4
 
-这是一个基于 **Python + FFmpeg** 的桌面工具：给音频文件套上一张静态封面图，批量转成 MP4 视频，专为 YouTube / Bilibili 等平台的音频存档场景设计。
+**English** | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-视频帧率强制为 1 FPS（每秒 1 帧静态图），在保证音频质量的同时把视频体积压到最小，节省上传时间与云端存储空间。
+![CI](https://github.com/YOUR_USERNAME/Mp3_to_Mp4/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-GPL--3.0-green)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
-从 **v4.0** 起集成 **faster-whisper 语音识别**：可为每个音频生成同名的 `.srt` 字幕与 `.txt` 文稿，支持中英混合识别，并可在识别前选择 RNNoise / GTCRN 降噪。
+Mp3 to MP4 is a Windows desktop tool that pairs audio files with a still cover image and exports MP4 videos. It can also transcribe audio into SRT and TXT subtitles and reduce background noise before recognition or export.
 
----
+![Application window](docs/screenshots/en.png)
 
-## ✨ 主要特性
+## Contents
 
-- **音频转 MP4**：MP3 / M4A / M4B / AAC / WAV / FLAC / OGG / OGA / OPUS / WMA / AIFF / APE 等 ffmpeg 可解的所有音频。
-- **批量处理**：一次选择多个文件，队列式逐个处理，实时百分比进度，可随时取消。
-- **极速渲染**：直接调用 FFmpeg 子进程（不经过 Python 媒体库），长音频也能秒级完成。
-- **语音转文字**：基于 faster-whisper（CTranslate2 推理），输出与 MP4 同名的 `.srt` 字幕与 `.txt` 文本，可单独上传 YouTube。
-- **中英混合识别**：默认自动检测语种，中英混说无需切换；也可强制指定中文或英文。
-- **识别模型可选**：`large-v3-turbo`（默认，精度优先）/ `medium` / `small`（速度快）/ `base` / `tiny`，随时切换。
-- **前置降噪**：RNNoise（零额外依赖，0.3 MB 模型）/ GTCRN 神经网络（0.5 MB 模型）两级可选。
-- **原声保留**：降噪只作用于「送去识别的音频」，成片 MP4 的音轨始终是原始音质。
-- **YouTube 兼容**：H.264 (`libx264`) + `yuv420p(tv)` + `faststart` + AAC 192k，上传即刻识别。
-- **封面自适应**：默认 1920x1080，非 16:9 封面等比缩放并补黑边；可切换 720p / 原图尺寸。
-- **省心细节**：自动探测系统 ffmpeg、记住上次设置、同名输出自动加序号不覆盖、异常弹窗提示。
+- [Execution model](#execution-model)
+- [Common combinations](#common-combinations)
+- [Output files and naming](#output-files-and-naming)
+- [Interface language](#interface-language)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Data and cache](#data-and-cache)
+- [Project structure](#project-structure)
+- [Development and testing](#development-and-testing)
+- [Known limitations](#known-limitations)
+- [License](#license)
+- [Credits](#credits)
 
-## 📦 环境要求
+## Execution model
 
-1. **Python 3.8+**（本项目在 Python 3.14 + Windows 10 上实测通过）。
-2. **FFmpeg** —— 需要包含 `libx264` 与 `aac` 编码器；降噪还需要 `arnndn` 滤镜（官方 full 版自带，essentials 版可能没有）。
+Select one or more audio files, configure the three option groups below, then press **Start** once. Files are processed one after another, and each file runs only the steps its options require.
 
-### 只转 MP4（不生成字幕）
+| Group | Setting | Choices |
+| --- | --- | --- |
+| A · Noise reduction | Strength | Off / Light (RNNoise) / Strong (GTCRN neural network) |
+| B · Recognition and subtitles | Model | Off, tiny, base, small, medium, large-v3-turbo |
+| | Spoken language | Auto-detect / Chinese / English |
+| | Subtitle formats | SRT and TXT, selected independently |
+| C · Video output | Video files | MP4 with the original audio and/or MP4 with the denoised audio |
+| | Cover image | JPG, PNG, BMP, WEBP |
+| | Resolution | 1080p (default) / 720p / original image size |
 
-无需安装任何 Python 第三方包，标准库 + Tkinter 即可运行。
+- Noise reduction runs at most once per file; subtitles and the denoised video reuse that result.
+- A cover image is required only when a video output is selected.
+- The denoised-video option requires noise reduction to be on; when noise reduction is Off, that option is ignored.
+- Accepted audio formats are the ones FFmpeg can decode, including MP3, M4A, M4B, AAC, WAV, FLAC, OGG, OGA, OPUS, WMA, AIFF, APE, WV, AMR, AC3, and DTS.
 
-### 需要语音识别 / 字幕
+Defaults: 1080p, large-v3-turbo, auto-detect, and light RNNoise.
 
-安装一次依赖（安装后约 200 MB 占用）：
+## Common combinations
+
+| Goal | What to select |
+| --- | --- |
+| Subtitles only | Any model except Off; check SRT and/or TXT; no cover needed |
+| MP4 with the original audio | Check "MP4 · Original Audio"; choose a cover |
+| MP4 with the denoised audio | Set noise reduction to Light or Strong; check "MP4 · Denoised Audio"; choose a cover |
+| Everything | Check both MP4 options and at least one subtitle format, and set noise reduction to Light or Strong |
+
+To preview noise reduction, set it to Light or Strong and leave every other option unchecked. The app then exports only `recording_denoised.wav`, which you can listen to before producing a video.
+
+## Output files and naming
+
+Output goes to the selected output folder. If no folder is selected, it goes to the folder of the first audio file.
+
+For an input named `recording.mp3`:
+
+| Output | File name |
+| --- | --- |
+| Subtitles | `recording.srt`, `recording.txt` |
+| Video with the original audio | `recording.mp4` |
+| Denoised audio | `recording_denoised.wav` (48 kHz, stereo, 16-bit PCM) |
+| Video with the denoised audio | `recording_denoised.mp4` |
+
+Existing files are never overwritten. If a name is already taken, ` (1)`, ` (2)`, and so on are appended before the extension.
+
+Video is encoded as H.264 (libx264) at 1 frame per second, with AAC 192 kbps audio and the `faststart` flag. In 1080p and 720p modes, covers that are not 16:9 are scaled down and padded with black bars; original-size mode keeps the source dimensions, rounded down to even numbers. SRT and TXT subtitles are separate files; they are not burned into the video.
+
+## Interface language
+
+The interface ships in Simplified Chinese, Traditional Chinese, and English. Use the selector in the top-right corner; the change applies immediately and does not restart the app. The first launch starts in Simplified Chinese, and the selection is remembered. Log lines that have already been written keep the language they were printed in and are not retranslated.
+
+## Requirements
+
+- Windows 10 or 11
+- Python 3.10 or newer
+- FFmpeg with the `libx264` and `aac` encoders
+
+FFmpeg is not bundled with the application and must be installed separately.
+
+## Installation
+
+### Option 1: run from a clone
+
+```bash
+git clone https://github.com/YOUR_USERNAME/Mp3_to_Mp4.git
+cd Mp3_to_Mp4
+pip install -r requirements.txt
+python MP3toMP4.py
+```
+
+### Option 2: install as a package
+
+```bash
+pip install .
+mp3tom4
+```
+
+`mp3tom4-gui` starts the same application.
+
+### Option 3: install with optional features
+
+```bash
+pip install ".[full]"
+```
+
+This adds `sherpa-onnx` for strong GTCRN noise reduction and `imageio-ffmpeg` as an additional FFmpeg source.
+
+### FFmpeg on Windows
 
 ```powershell
-python -m pip install faster-whisper sherpa-onnx
+winget install Gyan.FFmpeg
 ```
 
-| 依赖 | 作用 | 体积 |
-|---|---|---|
-| `faster-whisper` + `ctranslate2` + `av` + `onnxruntime` | 语音识别核心与 VAD 切句 | 约 200 MB |
-| `sherpa-onnx` | GTCRN 神经网络降噪（可选，只用 RNNoise 可不装） | 约 45 MB |
+The application searches, in order: the last path saved in the configuration, `ffmpeg.exe` next to the program, `PATH`, winget package directories, common installation paths, and `imageio-ffmpeg`. You can also click **Change** at the top of the window to select `ffmpeg.exe` manually. A build is accepted only if it provides both `libx264` and `aac`; otherwise the application reports which encoder is missing. Installing `imageio-ffmpeg` with pip adds one more fallback source.
 
-> 识别模型不包含在 pip 包里，首次选用某个模型时才会自动下载到
-> `%APPDATA%\Mp3ToMp4\models\whisper`，可随时手动删除，不影响程序运行。
->
-> 国内网络下载慢时，先设置镜像环境变量再启动程序：
->
-> ```powershell
-> set HF_ENDPOINT=https://hf-mirror.com
-> python MP3toMP4.py
-> ```
+## Data and cache
 
-Windows 安装官方静态版（推荐）：
+| Data | Location |
+| --- | --- |
+| Configuration | `%APPDATA%\Mp3ToMp4\config.json` |
+| Model cache | `%APPDATA%\Mp3ToMp4\models\` (with `whisper\` and `denoise\` subfolders) |
 
-```powershell
-winget install --id Gyan.FFmpeg -e
+The configuration file stores the FFmpeg path, the last cover image, the output folder, the resolution, the interface language, and the recognition settings.
+
+The first run with a given recognition model downloads its weights into `models\whisper\`:
+
+| Model | Download size |
+| --- | --- |
+| large-v3-turbo | 1.55 GB |
+| medium | 1.46 GB |
+| small | 464 MB |
+| base | 141 MB |
+| tiny | 75 MB |
+
+The download requires a network connection and can take minutes to tens of minutes. The log reports it before it starts, so an apparently idle first run is usually a download in progress. Models stay on disk between runs, and deleting the folder is safe. The two small noise-reduction models are downloaded into `models\denoise\` on first use.
+
+## Project structure
+
+```text
+mp3tom4/
+├── config.py       constants, configuration, paths
+├── i18n.py         localization framework
+├── ffmpeg.py       FFmpeg discovery, filters, muxing
+├── denoise.py      noise reduction (RNNoise / GTCRN)
+├── asr.py          speech recognition (faster-whisper)
+├── subtitle.py     SRT / TXT generation
+├── pipeline.py     job orchestration
+├── ui/             interface
+└── locale/         translation catalogs
+tests/              pytest suite
 ```
 
-安装后 `ffmpeg` / `ffprobe` 会加入 PATH，其他软件也能直接调用。
+## Development and testing
 
-程序启动时会按以下顺序自动探测，通常无需手动配置：
-
-1. 配置文件里上次使用的路径
-2. 程序所在目录的 `ffmpeg.exe` / `bin\ffmpeg.exe`
-3. 系统 PATH
-4. winget 安装目录（`%LOCALAPPDATA%\Microsoft\WinGet\...`）
-5. 常见安装路径（`C:\ffmpeg\bin`、`C:\Program Files\ffmpeg\bin` 等）
-6. 已安装的 `imageio-ffmpeg` 包
-
-若都找不到，可点界面右上角「更换」手动指定 `ffmpeg.exe`，程序会记住该路径。
-
-### 关于体积
-
-- `Gyan.FFmpeg`（full 静态版）解压后约 **696 MB**：`ffmpeg.exe` 227MB + `ffprobe.exe` 227MB + `ffplay.exe` 229MB，三个 exe 各自内嵌全部库。
-- 若在意空间：可改装 `Gyan.FFmpeg.Essentials`（更小），或从官方压缩包中只取 `ffmpeg.exe` 放到任意目录，再在程序里手动指定。
-- 对照参考：MoviePy 方案表面上只是一个 Python 包（本体 wheel 0.1MB），但它依赖 `imageio-ffmpeg`（wheel 29.8MB，内含 ffmpeg 二进制）+ `numpy` + `pillow`，**本质仍是"ffmpeg + 封装层"**，并不会更省空间。
-
-## 🚀 如何使用
-
-1. 获取本项目（克隆或下载）。
-2. 运行主程序：
-
-   ```bash
-   python MP3toMP4.py
-   ```
-
-3. 在界面中按步骤操作：
-
-   | 步骤 | 操作 |
-   |---|---|
-   | 1 | 点击「选择批量音频文件」，可多选或 `Ctrl+A` 全选 |
-   | 2 | 点击「选择封面图片」，支持 JPG / PNG / BMP / WEBP |
-   | 3 | 点击「选择 MP4 输出文件夹」（不选则默认输出到音频所在目录） |
-   | 尺寸 | 下拉选择 `1080p`（默认）/ `720p` / `原图尺寸` |
-   | 字幕 | 需要文字稿时勾选「识别语音并生成字幕」，再选模型 / 语种 / 降噪 |
-   | 4 | 点击「开始批量转换」，日志区实时显示结果 |
-
-4. 完成后到输出目录取 MP4，直接上传 YouTube 即可；如生成了字幕，再单独上传 `.srt`。
-
-> 输出参数：`1920x1080`（或所选尺寸）、`1 fps`、`H.264 High`、`AAC-LC 192k`、`+faststart`（便于网页端秒开）。
-> 音频采样率保持源文件原样，不做多余重采样。
-
-## 🎧 语音识别与字幕（v4.0）
-
-勾选「识别语音并生成字幕」后，程序会对每个音频执行：
-
-```
-原始音频 ──(可选降噪)──> 16kHz 单声道 WAV ──> faster-whisper ──> .srt + .txt
-                                                        │
-                                                        └──> 原 MP4 渲染流程（音轨保持原声）
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
 ```
 
-- 输出文件与 MP4 **同名同目录**：`会议录音.mp4` + `会议录音.srt` + `会议录音.txt`。
-- `SRT` 时间轴来自 Whisper 分段 + Silero VAD 切句，中文按显示宽度自动折行（每行约 21 个汉字）。
-- `TXT` 是按段落拼接的连续文稿，中文之间不插空格，英文之间保留空格。
-- 字幕不烧进画面、也不封装进 MP4，属于外挂字幕，YouTube / Bilibili 都可单独上传。
+Tests that invoke a real FFmpeg binary are marked `integration` and can be skipped with `pytest tests/ -m "not integration"`.
 
-### 识别模型
+## Known limitations
 
-| 模型 | 下载体积 | CPU 速度（1 小时音频，估算） | 适用场景 |
-|---|---|---|---|
-| `large-v3-turbo`（默认） | 1.55 GB | 30–90 分钟 | 嘈杂环境、口音重、要求最高准确率 |
-| `medium` | 1.46 GB | 25–70 分钟 | turbo 之前的折中选择 |
-| `small` | 464 MB | 5–15 分钟 | 会议录音清晰、追求速度 |
-| `base` | 141 MB | 3–6 分钟 | 快速过一遍大意 |
-| `tiny` | 75 MB | 1–3 分钟 | 只做关键词检索 |
+1. **Strong noise reduction loses high frequencies.** GTCRN works on 16 kHz audio, and the result is upsampled to 48 kHz. High-frequency detail is genuinely lost and the output can sound dull. Use Light RNNoise when fidelity matters, and Strong GTCRN when noise removal matters more.
+2. **Cancellation is not instantaneous.** FFmpeg-based steps such as noise reduction and muxing stop immediately, but Whisper inference is a blocking call, so cancellation waits for the current segment to finish.
+3. **The first transcription is slow.** It includes downloading the model and can take minutes to tens of minutes depending on the network and model size.
+4. **Subtitles are sidecar files.** They are not burned into the video picture.
+5. **Log history is not retranslated.** Switching the interface language leaves existing log lines in their original language.
 
-> 同一时间只加载一个模型，切换模型会自动释放上一个，不会叠加内存占用。
-> 模型下载支持断点续传，存放在 `%APPDATA%\Mp3ToMp4\models\whisper`。
+## License
 
-### 降噪
+GPL-3.0-or-later. See [LICENSE](LICENSE) for the full text. You may use, modify, and redistribute the software; if you distribute a modified version, it must be released under the same license.
 
-| 模式 | 依赖 | 模型 | 说明 |
-|---|---|---|---|
-| 关闭 | 无 | 无 | 原始音频直接识别，速度最快 |
-| 轻度 · RNNoise（默认） | 仅 ffmpeg 的 `arnndn` 滤镜 | 0.29 MB | 抑制空调、风扇、路噪、键盘等底噪，几乎不耗时 |
-| 强力 · GTCRN | `sherpa-onnx` | 0.51 MB | 神经网络降噪，嘈杂环境更干净，约 1–3 倍实时耗时 |
+## Credits
 
-- 两个降噪模型都会在首次使用时自动下载到 `%APPDATA%\Mp3ToMp4\models\denoise`。
-- 若 GTCRN 依赖缺失，会自动回退 RNNoise，不会中断任务。
-- **降噪只影响识别输入，不改动 MP4 音轨**，成片始终保留原始音质。
-- 降噪不是越强越好：过度降噪会削掉辅音，反而降低识别率。干净录音建议直接「关闭」。
-
-### 关于中英混合
-
-Whisper 的语种参数是**整段音频级别**的检测，不是逐句切换。因此：
-
-- 默认「自动检测」会用前 30 秒判断语种，之后整段沿用该语言 token；
-- 由于 Whisper 训练数据包含大量 code-switch，即使判定为中文，夹杂的英文单词通常也能正确转写；
-- 若你明确知道整段是英文/中文，手动指定反而更稳（减少误判）；
-- 不建议为了"逐句切换语种"去切分音频，收益很小且会破坏时间轴。
-
-## 📁 项目结构
-
-```
-Py_Mp3_to_Mp4/
-├── MP3toMP4.py            # 主程序（Tkinter GUI + FFmpeg 调度）
-├── Black.png              # 纯黑封面占位图（9×8，可作极简背景）
-├── README.MD              # 项目说明与开发日志
-├── .gitignore             # 版本库忽略规则
-├── .vscode/
-│   └── settings.json      # 编辑器配置
-└── Archive/
-    └── MP3toMP4.py        # 历史归档版本（MoviePy 时期的快照，仅供追溯）
-```
-
-配置文件保存在 `%APPDATA%\Mp3ToMp4\config.json`，用于记住 ffmpeg 路径、封面图、输出目录、尺寸，以及字幕开关 / 模型 / 语种 / 降噪偏好，不进入版本库。
-
-模型缓存位于 `%APPDATA%\Mp3ToMp4\models`：
-
-```
-models/
-├── whisper/     # faster-whisper 模型（按需下载，可整个删除）
-└── denoise/     # bd.rnnn（RNNoise）与 gtcrn_simple.onnx（GTCRN）
-```
-
-> 说明：版本变更记录统一维护在本 README 的「开发日志 (Changelog)」章节，不单独建立 `CHANGELOG.md`，避免多份记录不同步。
-
-##  开发日志 (Changelog)
-
-### v4.0 (语音识别 / 降噪字幕版)
-- **语音识别**：集成 faster-whisper 1.2.x + CTranslate2，输出同名 `.srt` 与 `.txt`，MP4 渲染逻辑完全不变。
-- **混合语种**：默认自动检测，支持强制中文 / 英文；中英混说可直接识别。
-- **模型可选**：`large-v3-turbo`（默认）/ `medium` / `small` / `base` / `tiny`，下拉切换，按需下载并缓存。
-- **前置降噪**：RNNoise（ffmpeg `arnndn`，零新增依赖）与 GTCRN（sherpa-onnx）两级，自动下载 0.3–0.5 MB 小模型。
-- **健壮性**：FFmpeg 统一解码为 16k 单声道 WAV 后以 numpy 送入模型，规避 faster-whisper 内置 PyAV 与新版 `av` 的接口不兼容问题。
-- **原声保留**：降噪仅作用于识别输入，成片音轨不做任何处理。
-- **失败隔离**：识别/降噪异常只跳过字幕，不影响 MP4 生成；GTCRN 不可用时自动回退 RNNoise。
-
-### v3.0 (FFmpeg 引擎版)
-- **引擎切换**：由 MoviePy 改为直接调用 FFmpeg 子进程，速度更快、内存更低，且不再依赖任何 Python 媒体库。
-- **多格式支持**：从仅支持 MP3 扩展到 M4A / AAC / WAV / FLAC / OGG / OPUS / WMA / AIFF / APE 等全部 ffmpeg 可解格式。
-- **封面适配**：默认 1920x1080，等比缩放 + 黑边补齐；新增 720p 与原图尺寸选项；奇数尺寸自动修正为偶数。
-- **YouTube 兼容**：显式转换 `yuv420p(tv)` 并启用 `faststart`，避免 full-range 封面导致上传后偏色。
-- **体验增强**：实时百分比进度、中途取消、记住上次设置、同名输出自动加序号、启动异常弹窗提示。
-- **健壮性**：自动探测 ffmpeg（含编码器能力校验），自动跳过不支持 `libx264` 的第三方内置版本。
-
-### 仓库维护（Docs）
-- **结构规范化**：新增 `.gitignore`；历史版本归档至 `Archive/`；README 补充「项目结构」说明。
-
-### v2.1 (MoviePy 2.x 适配版)
-- **语法重构**：完美适配 MoviePy v2.0+ 最新版 API。将废弃的 `set_duration` 和 `set_audio` 替换为全新的 `with_duration` 和 `with_audio` 链式调用方法。
-- **核心引擎升级**：直接从 `moviepy` 根目录引入核心类，摒弃了已被官方移除的 `moviepy.editor` 子模块。
-
-### v1.0 (极速渲染奠基版)
-- **架构确立**：引入轻量级 MoviePy 作为核心调度引擎，底层隐式调用 FFmpeg 进行音视频混流封装。
-- **核心算法优化**：针对"音频存档"的业务特性，强制覆写视频帧率为 1 FPS（每秒 1 帧静态图）。
-- **批量自动化**：集成 Tkinter GUI，实现三步极简工作流。
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — speech recognition
+- [GTCRN / sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — strong noise reduction
+- [RNNoise](https://jmvalin.ca/demos/rnnoise/) — light noise reduction
+- [FFmpeg](https://ffmpeg.org/) — decoding, encoding, and muxing
