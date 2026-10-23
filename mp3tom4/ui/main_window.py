@@ -561,9 +561,9 @@ class AudioToVideoApp:
                 [name for name, on in (("SRT", plan.srt), ("TXT", plan.txt)) if on])
             tasks.append(texts.TASK_SUBTITLE.format(formats=formats))
         if plan.mux_original:
-            tasks.append(texts.CHK_MUX_ORIGINAL)
+            tasks.append(texts.TASK_MUX_ORIGINAL)
         if plan.mux_denoised:
-            tasks.append(texts.CHK_MUX_DENOISED)
+            tasks.append(texts.TASK_MUX_DENOISED)
 
         self.log(texts.LOG_TASK_HEADER)
         self.log(texts.LOG_OUTPUT_DIR.format(dir=plan.output_dir))
