@@ -170,6 +170,42 @@ def test_linkage_greying_rules(app):
     assert str(gui.chk_txt.cget("state")) == "normal"
 
 
+def test_denoise_off_auto_unchecks_denoised_mp4(app):
+    """降噪切到关闭 → 已勾选的「降噪音频配图 MP4」自动取消并给出说明。"""
+    _, gui = app
+    gui.audio_files = ["C:/fake/a.mp3"]
+    gui.image_path = "C:/fake/cover.png"
+
+    gui.set_option(gui.cmb_denoise, "arnndn")
+    gui.mux_denoised_var.set(True)
+    gui._sync_options()
+    assert gui.mux_denoised_var.get() is True
+    assert str(gui.chk_mux_denoised.cget("state")) == "normal"
+
+    gui.set_option(gui.cmb_denoise, "off")
+
+    assert gui.mux_denoised_var.get() is False
+    assert str(gui.chk_mux_denoised.cget("state")) == "disabled"
+    assert texts.STAGE_DENOISE_AUTO_UNCHECKED in gui.stage_var.get()
+    # 自动取消必须落盘，避免下次启动又从配置里「复活」
+    assert gui.cfg["mux_denoised"] is False
+
+
+def test_denoise_reenable_does_not_recheck(app):
+    """反向：重新开启降噪不会自动恢复勾选，由用户重新决定。"""
+    _, gui = app
+    gui.audio_files = ["C:/fake/a.mp3"]
+
+    gui.mux_denoised_var.set(True)
+    gui._sync_options()
+    gui.set_option(gui.cmb_denoise, "off")
+    assert gui.mux_denoised_var.get() is False
+
+    gui.set_option(gui.cmb_denoise, "arnndn")
+    assert gui.mux_denoised_var.get() is False
+    assert str(gui.chk_mux_denoised.cget("state")) == "normal"
+
+
 def test_config_persists_internal_values(monkeypatch):
     """配置文件里写入的必须是内部值，而不是下拉框显示文案。"""
     root, gui, saved = _make_app(monkeypatch)
@@ -213,6 +249,22 @@ def test_legacy_chinese_config_maps_to_internal(monkeypatch):
         root.destroy()
 
 
+def test_unknown_model_falls_back_to_default(monkeypatch):
+    """未知模型名 → 回退默认模型（不能回退到 "off" 静默关闭识别），并打日志。"""
+    root, gui, _saved = _make_app(monkeypatch, cfg={"stt_model": "不存在的模型"})
+    try:
+        assert gui.stt_model_var.get() == DEFAULT_STT_MODEL
+        assert gui.stt_model_var.get() != "off"
+
+        root.update()
+        root.update()
+        log_text = gui.text_area.get("1.0", "end")
+        assert "无法识别" in log_text
+        assert DEFAULT_STT_MODEL in log_text
+    finally:
+        root.destroy()
+
+
 def test_display_labels_come_from_options():
     """下拉框显示项就是选项表文案，且与内部值一一对应。"""
     from mp3tom4.config import option_labels
@@ -222,6 +274,31 @@ def test_display_labels_come_from_options():
     assert option_labels(DENOISE_OPTIONS) == [
         "关闭", "轻度 · RNNoise（推荐）", "强力 · GTCRN（神经网络）"]
     assert "large-v3-turbo（1.55 GB · 精度优先）" in option_labels(STT_MODEL_OPTIONS)
+
+
+def test_refresh_ffmpeg_keeps_saved_usable_path(monkeypatch):
+    """重新检测不得覆盖仍然可用的手动指定路径。"""
+    manual = "C:/MyFFmpeg/bin/ffmpeg.exe"
+    auto = "C:/auto/ffmpeg.exe"
+
+    def fake_discover(saved_path=None):
+        return ([
+            {"path": auto, "version": "ffmpeg version 7.0", "libx264": True, "aac": True},
+            {"path": manual, "version": "ffmpeg version 6.1", "libx264": True, "aac": True},
+        ], [])
+
+    root, gui, _saved = _make_app(
+        monkeypatch, cfg={"ffmpeg_path": manual}, discover=fake_discover)
+    try:
+        gui.refresh_ffmpeg()
+        assert gui.ffmpeg_path == manual
+        assert gui.cfg["ffmpeg_path"] == manual
+
+        root.update()
+        root.update()
+        assert "保留已指定的 FFmpeg" in gui.text_area.get("1.0", "end")
+    finally:
+        root.destroy()
 
 
 def test_refresh_ffmpeg_replaces_stale_path(monkeypatch):

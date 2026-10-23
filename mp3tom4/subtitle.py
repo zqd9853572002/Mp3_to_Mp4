@@ -59,13 +59,16 @@ def wrap_subtitle(text: str, limit: int = 42, max_lines: int = 3):
 
 
 def write_srt(segments, path: str) -> None:
+    """写出 SRT。序号只对**真正写出**的条目递增，保证 1,2,3… 连续无跳号。"""
     blocks = []
-    for index, seg in enumerate(segments, start=1):
+    index = 0
+    for seg in segments:
         start = max(0.0, seg["start"])
         end = max(start + 0.2, seg["end"])
         lines = wrap_subtitle(seg["text"])
         if not lines:
             continue
+        index += 1
         blocks.append(str(index))
         blocks.append(f"{format_timestamp(start)} --> {format_timestamp(end)}")
         blocks.extend(lines)

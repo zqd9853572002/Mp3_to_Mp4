@@ -101,6 +101,26 @@ def test_write_srt_skips_blank_text(tmp_path):
     assert path.read_text(encoding="utf-8") == "\n"
 
 
+def test_write_srt_numbering_is_continuous(tmp_path):
+    """空文本段被跳过时，序号必须仍然从 1 连续递增（不能跳号）。"""
+    segments = [
+        {"start": 0.0, "end": 1.0, "text": "first"},
+        {"start": 1.0, "end": 2.0, "text": "   "},   # 折行后为空 → 跳过
+        {"start": 2.0, "end": 3.0, "text": "second"},
+        {"start": 3.0, "end": 4.0, "text": ""},      # 同样跳过
+        {"start": 4.0, "end": 5.0, "text": "third"},
+    ]
+    path = tmp_path / "continuous.srt"
+    st.write_srt(segments, str(path))
+
+    content = path.read_text(encoding="utf-8")
+    assert content.startswith("1\n00:00:00,000 --> 00:00:01,000\nfirst\n")
+    assert "\n2\n00:00:02,000 --> 00:00:03,000\nsecond\n" in content
+    assert "\n3\n00:00:04,000 --> 00:00:05,000\nthird\n" in content
+    assert "\n4\n" not in content
+    assert [line for line in content.splitlines() if line.isdigit()] == ["1", "2", "3"]
+
+
 def test_write_srt_duplicate_name_uses_unique_path(tmp_path):
     segments = [{"start": 0.0, "end": 1.0, "text": "你好"}]
     target = str(tmp_path / "a.srt")

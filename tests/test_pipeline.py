@@ -129,6 +129,39 @@ def test_plan_keeps_ffmpeg_path():
     assert make_plan(ffmpeg_path="/x/ffmpeg.exe").ffmpeg_path == "/x/ffmpeg.exe"
 
 
+def test_do_stt_uses_denoise_mode_from_plan(monkeypatch):
+    """识别前的降噪模式必须来自任务计划，而不是硬编码的 "off"。"""
+    captured = {}
+
+    def fake_prepare(ffmpeg, src, mode, workdir, log=None):
+        captured["mode"] = mode
+        return ""  # 空串让 _do_stt 立即走「预处理失败」分支，避免真正转写
+
+    monkeypatch.setattr(pipeline_mod, "prepare_asr_audio", fake_prepare)
+    plan = make_plan(srt=True, denoise_code="gtcrn")
+    pipeline = Pipeline(plan)
+
+    assert pipeline._do_stt("/tmp/a.mp3", "stem", 0.0, 0.0, 100.0,
+                            denoise_mode=plan.denoise_mode,
+                            already_denoised=False) is False
+    assert captured["mode"] == "gtcrn"
+
+    # 源音频已经是降噪产物时不得重复降噪
+    captured.clear()
+    pipeline._do_stt("/tmp/a_denoised.wav", "stem", 0.0, 0.0, 100.0,
+                     denoise_mode=plan.denoise_mode,
+                     already_denoised=True)
+    assert captured["mode"] == "off"
+
+    # 计划本身关闭降噪时同样透传 "off"
+    captured.clear()
+    off_plan = make_plan(srt=True, denoise_code="off")
+    Pipeline(off_plan)._do_stt("/tmp/a.mp3", "stem", 0.0, 0.0, 100.0,
+                               denoise_mode=off_plan.denoise_mode,
+                               already_denoised=False)
+    assert captured["mode"] == "off"
+
+
 @pytest.mark.parametrize("overrides", [
     {"srt": True},
     {"txt": True},

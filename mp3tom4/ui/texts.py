@@ -63,6 +63,9 @@ STAGE_CANCELLING = "正在取消..."
 STAGE_CANCELLED = "已取消"
 STAGE_DONE = "完成"
 STAGE_READY_HINT = "就绪 · {count} 个音频 · {actions}"
+# 降噪关闭时自动取消「降噪音频配图 MP4」后的中性说明
+STAGE_DENOISE_AUTO_UNCHECKED = "降噪已关闭，降噪版 MP4 已自动取消"
+STAGE_WITH_NOTE = "{hint} · {note}"
 
 # ---------- 校验提示 ----------
 VALIDATE_NO_AUDIO = "请选择音频文件"
@@ -110,6 +113,7 @@ LOG_ASR_MISSING = (
 LOG_DENOISE_READY = ">>> 🧹 降噪：RNNoise 与 GTCRN 均可使用。\n\n"
 LOG_DENOISE_PARTIAL = ">>> 🧹 降噪：RNNoise 可用；GTCRN 需 python -m pip install sherpa-onnx。\n\n"
 LOG_FFMPEG_ENABLED = ">>> ✅ 已启用 FFmpeg: {info}\n"
+LOG_FFMPEG_KEPT = ">>> ✅ 保留已指定的 FFmpeg: {path}\n"
 LOG_FFMPEG_SKIPPED = ">>> ⚠ 已跳过缺少 libx264/aac 的 ffmpeg: {dirs}\n"
 LOG_FFMPEG_NONE = ">>> ❌ 未找到可用的 ffmpeg（需支持 libx264 与 aac）。\n"
 LOG_FFMPEG_REJECTED_HEADER = ">>> 检测到但不可用的版本:\n"

@@ -211,17 +211,25 @@ class Pipeline:
             self._proc_cb(proc)
 
     # ---------- 单文件步骤 ----------
-    def _do_stt(self, asr_src, stem, duration, p_start, p_end):
-        """语音识别并按勾选写出 SRT / TXT；失败不影响后续步骤。"""
+    def _do_stt(self, asr_src, stem, duration, p_start, p_end, *,
+                denoise_mode=None, already_denoised=False):
+        """语音识别并按勾选写出 SRT / TXT；失败不影响后续步骤。
+
+        降噪参数**显式**来自调用方（计划中的 `denoise_mode`），不再硬编码为
+        "off"：若传入的是原声（`already_denoised=False`），识别前仍会按计划降噪，
+        因此即使步骤顺序被重排，也不会悄悄退化成「对原声识别」。
+        """
         plan = self.plan
         workdir = tempfile.mkdtemp(prefix="mp3tomp4_asr_")
         started = time.time()
         try:
             lang_text = plan.language or TXT_LANG_AUTO
             self.log(LOG_ASR_START.format(model=plan.model_name, lang=lang_text))
+            # 源已是降噪产物时不能再降一遍；只有原声才按计划降噪
+            asr_denoise = "off" if already_denoised else (denoise_mode or "off")
             # 降噪音频是 48k 成片音轨，这里统一重新解码成 ASR 需要的 16k 单声道
             asr_input = prepare_asr_audio(
-                plan.ffmpeg_path, asr_src, "off", workdir, self.log)
+                plan.ffmpeg_path, asr_src, asr_denoise, workdir, self.log)
             if not asr_input:
                 self.log(LOG_ASR_PREPARE_FAILED, True)
                 return False
@@ -352,8 +360,11 @@ class Pipeline:
                         self.log(LOG_DENOISE_DONE.format(name=os.path.basename(out_wav)))
 
                     elif step_name == STEP_STT:
-                        if not self._do_stt(denoised_audio or audio_path,
-                                            stem, duration, p_start, p_end) and self.should_stop():
+                        if not self._do_stt(
+                            denoised_audio or audio_path, stem, duration, p_start, p_end,
+                            denoise_mode=plan.denoise_mode,
+                            already_denoised=bool(denoised_audio),
+                        ) and self.should_stop():
                             cancelled = True
                             break
 

@@ -209,9 +209,18 @@ class AudioToVideoApp:
             self.chk_srt.config(state=tk.DISABLED)
             self.chk_txt.config(state=tk.DISABLED)
 
-        # 降噪 = 关闭 → 降噪 MP4 置灰（保留原勾选，恢复时自动还原）
-        self.chk_mux_denoised.config(
-            state=tk.NORMAL if flags["denoise_on"] else tk.DISABLED)
+        # 降噪 = 关闭 → 降噪 MP4 置灰，并**自动取消勾选**（否则会被静默跳过）。
+        # 反向不自动恢复勾选：重新开启降噪后由用户重新决定。
+        auto_unchecked = False
+        if flags["denoise_on"]:
+            self.chk_mux_denoised.config(state=tk.NORMAL)
+        else:
+            self.chk_mux_denoised.config(state=tk.DISABLED)
+            if self.mux_denoised_var.get():
+                self.mux_denoised_var.set(False)
+                auto_unchecked = True
+                self.cfg["mux_denoised"] = False
+                save_config(self.cfg)
 
         # 封面按钮：没有视频输出时灰色但仍可点击，方便提前准备素材
         if flags["mux_original"] or flags["mux_denoised"]:
@@ -222,6 +231,9 @@ class AudioToVideoApp:
                                 activeforeground="#9A9A9A", cursor="hand2")
 
         ok, hint = self._validate_plan()
+        if auto_unchecked:
+            hint = texts.STAGE_WITH_NOTE.format(
+                hint=hint, note=texts.STAGE_DENOISE_AUTO_UNCHECKED)
         self.btn_start.config(state=tk.NORMAL if ok else tk.DISABLED)
         self.stage_var.set(hint)
 
@@ -436,15 +448,19 @@ class AudioToVideoApp:
 
     # ---------- 引擎 ----------
     def refresh_ffmpeg(self):
-        saved = self.cfg.get("ffmpeg_path")
+        saved = self.cfg.get("ffmpeg_path") or ""
         usable, rejected = discover_ffmpeg(saved)
         if usable:
-            best = usable[0]
+            # 已保存的路径若仍可用则优先保留，避免「重新检测」覆盖用户手动指定的引擎
+            kept = self._find_usable(saved, usable)
+            best = kept or usable[0]
             self.ffmpeg_path = best["path"]
             ver = best["version"].replace("ffmpeg version", "").strip()
             short = ver.split("Copyright")[0].strip()[:60]
             self.ffmpeg_text = f"{best['path']}  ({short})"
             self.lbl_engine.config(text=self.ffmpeg_text, fg="#4AF626")
+            if kept:
+                self.log(texts.LOG_FFMPEG_KEPT.format(path=kept["path"]))
             self.log(texts.LOG_FFMPEG_ENABLED.format(info=self.ffmpeg_text))
             if rejected:
                 self.log(texts.LOG_FFMPEG_SKIPPED.format(
@@ -459,6 +475,17 @@ class AudioToVideoApp:
                 for r in rejected:
                     self.log(texts.LOG_FFMPEG_REJECTED_ITEM.format(
                         path=r["path"], libx264=r["libx264"], aac=r["aac"]), is_error=True)
+
+    @staticmethod
+    def _find_usable(saved, usable):
+        """在探测结果中找回已保存的路径（忽略大小写与斜杠差异）。"""
+        if not saved:
+            return None
+        target = os.path.normcase(os.path.normpath(saved))
+        for info in usable:
+            if os.path.normcase(os.path.normpath(info["path"])) == target:
+                return info
+        return None
 
     def _persist_path_only(self):
         if self.ffmpeg_path and self.cfg.get("ffmpeg_path") != self.ffmpeg_path:
