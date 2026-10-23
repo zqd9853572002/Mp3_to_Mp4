@@ -9,6 +9,14 @@
 
 【开发日志 / Changelog】
 
+v4.0 (语音识别 / 降噪字幕版)
+  - 语音识别：集成 faster-whisper（CTranslate2 推理），音频/视频转写为文字，输出同名 .srt 字幕与 .txt 文本。
+  - 混合语种：默认自动检测，中英混说无需手动切换；也可强制指定中文或英文。
+  - 模型可选：large-v3-turbo（1.55GB，默认，精度优先）/ medium / small（464MB，速度快）/ base / tiny。
+  - 前置降噪：RNNoise（ffmpeg arnndn，0.3MB，零额外依赖）与 GTCRN 神经网络（sherpa-onnx，0.5MB）两级可选。
+    降噪只作用于「送去识别的音频」，成片 MP4 的音轨始终保持原始音质。
+  - 渲染逻辑不变：仍是 1 FPS 静态图 + AAC 192k，字幕以旁挂文件形式输出，方便 YouTube 单独上传。
+
 v3.0 (FFmpeg 引擎版)
   - 引擎切换：由 MoviePy 改为直接调用 FFmpeg 子进程。速度更快、内存占用更低，且不再依赖 Python 媒体库。
   - 多格式支持：MP3 / M4A / AAC / WAV / FLAC / OGG / OPUS / WMA / AIFF / APE 等 ffmpeg 可解的所有音频。
@@ -30,6 +38,7 @@ v1.0 (极速渲染奠基版)
 """
 
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -38,7 +47,10 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import tkinter as tk
+import unicodedata
+import urllib.request
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
@@ -52,7 +64,7 @@ if sys.platform == "win32":
         pass
 
 APP_NAME = "Mp3ToMp4"
-APP_VERSION = "3.0"
+APP_VERSION = "4.0"
 APP_TITLE = "极速音频转 MP4 批量引擎"
 
 AUDIO_EXTS = (
@@ -77,6 +89,34 @@ SIZE_MODES = {
 }
 SIZE_TARGETS = {"1080p": (1920, 1080), "720p": (1280, 720)}
 DEFAULT_MODE = "1080p"
+
+# ---------- 语音识别 / 降噪 ----------
+STT_MODELS = {
+    "large-v3-turbo（1.55 GB · 精度优先）": "large-v3-turbo",
+    "medium（1.46 GB · 折中）": "medium",
+    "small（464 MB · 速度快）": "small",
+    "base（141 MB · 轻量）": "base",
+    "tiny（75 MB · 极速）": "tiny",
+}
+STT_LANGS = {
+    "自动检测（中英混合）": "auto",
+    "中文": "zh",
+    "英文": "en",
+}
+DENOISE_MODES = {
+    "关闭": "off",
+    "轻度 · RNNoise（推荐）": "arnndn",
+    "强力 · GTCRN（神经网络）": "gtcrn",
+}
+DEFAULT_STT_MODEL = "large-v3-turbo"
+DEFAULT_STT_LANG = "auto"
+DEFAULT_DENOISE = "arnndn"
+
+RNNOISE_URL = "https://raw.githubusercontent.com/richardpl/arnndn-models/master/bd.rnnn"
+GTCRN_URL = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
+    "speech-enhancement-models/gtcrn_simple.onnx"
+)
 
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -278,13 +318,357 @@ def convert_one(ffmpeg, audio_path, image_path, out_path, mode, duration, on_pro
     return proc.returncode, err_text
 
 
+# ==================== 语音识别 / 降噪 ====================
+_WHISPER_CACHE = {}
+_DENOISER_CACHE = {}
+
+
+def module_available(name: str) -> bool:
+    """只检查模块是否存在，不真正导入（避免启动变慢）。"""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except Exception:
+        return False
+
+
+def models_root() -> Path:
+    base = os.environ.get("APPDATA") or str(Path.home())
+    return Path(base) / APP_NAME / "models"
+
+
+def whisper_model_ready(model_name: str) -> bool:
+    """判断 HuggingFace 缓存里是否已有该模型的权重。"""
+    root = models_root() / "whisper"
+    if not root.is_dir():
+        return False
+    for repo in root.glob("models--*"):
+        if repo.name.endswith(model_name) and any(repo.rglob("model.bin")):
+            return True
+    return False
+
+
+def download_file(url: str, dest: Path, log=None, label: str = "") -> bool:
+    """带 .part 临时文件的小文件下载，失败不抛异常。"""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        if log:
+            log(f"    ⏬ 正在下载{label} {dest.name} …\n")
+        req = urllib.request.Request(url, headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"})
+        done = 0
+        with urllib.request.urlopen(req, timeout=60) as resp, open(tmp, "wb") as fh:
+            while True:
+                chunk = resp.read(1 << 18)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                done += len(chunk)
+        tmp.replace(dest)
+        if log:
+            log(f"    ✅ 已保存 {dest.name}（{done / 1048576:.2f} MB）\n")
+        return True
+    except Exception as exc:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        if log:
+            log(f"    ❌ 下载失败：{exc}\n", True)
+        return False
+
+
+def ensure_denoise_model(mode: str, log=None) -> str:
+    """确保降噪模型就位，返回本地路径；失败返回空串。"""
+    cache = models_root() / "denoise"
+    if mode == "arnndn":
+        dest = cache / "bd.rnnn"
+        if dest.is_file() and dest.stat().st_size > 100_000:
+            return str(dest)
+        return str(dest) if download_file(RNNOISE_URL, dest, log, "RNNoise 模型") else ""
+    if mode == "gtcrn":
+        dest = cache / "gtcrn_simple.onnx"
+        if dest.is_file() and dest.stat().st_size > 400_000:
+            return str(dest)
+        return str(dest) if download_file(GTCRN_URL, dest, log, "GTCRN 模型") else ""
+    return ""
+
+
+def filter_escape_path(path: str) -> str:
+    """FFmpeg 滤镜参数里的 Windows 路径需要转义盘符冒号。"""
+    return path.replace("\\", "/").replace(":", "\\:")
+
+
+def decode_to_wav(ffmpeg: str, src: str, dst: str, audio_filter: str = ""):
+    """用 ffmpeg 解码为 16kHz 单声道 PCM WAV，返回 (ok, 错误文本)。"""
+    cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", src]
+    if audio_filter:
+        cmd += ["-af", audio_filter]
+    cmd += ["-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", dst]
+    res = run_quiet(cmd, timeout=3600)
+    if res is None:
+        return False, "ffmpeg 无法启动"
+    if res.returncode != 0:
+        return False, (res.stderr or res.stdout or "ffmpeg 解码失败")
+    return True, ""
+
+
+def read_wav_float32(path: str):
+    """读取 PCM WAV 为 numpy float32 单声道（-1.0 ~ 1.0）。"""
+    import wave
+
+    import numpy as np
+
+    with wave.open(path, "rb") as w:
+        frames = w.getnframes()
+        channels = w.getnchannels()
+        width = w.getsampwidth()
+        rate = w.getframerate()
+        raw = w.readframes(frames)
+    if width == 2:
+        data = np.frombuffer(raw, dtype="<i2").astype("float32") / 32768.0
+    elif width == 4:
+        data = np.frombuffer(raw, dtype="<i4").astype("float32") / 2147483648.0
+    else:
+        data = np.frombuffer(raw, dtype=np.uint8).astype("float32") / 128.0 - 1.0
+    if channels > 1:
+        data = data.reshape(-1, channels).mean(axis=1)
+    return data, rate
+
+
+def write_wav_s16(path: str, samples, rate: int) -> None:
+    """把 float32 波形写成 16bit PCM WAV。"""
+    import wave
+
+    import numpy as np
+
+    arr = np.clip(np.asarray(samples, dtype="float32"), -1.0, 1.0)
+    pcm = (arr * 32767.0).astype("<i2").tobytes()
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(int(rate))
+        w.writeframes(pcm)
+
+
+def _run_gtcrn(base_wav: str, out_wav: str, model_path: str, log=None) -> bool:
+    """用 sherpa-onnx 的 GTCRN 模型做神经网络降噪。"""
+    try:
+        import sherpa_onnx
+
+        denoiser = _DENOISER_CACHE.get(model_path)
+        if denoiser is None:
+            cfg = sherpa_onnx.OfflineSpeechDenoiserConfig(
+                model=sherpa_onnx.OfflineSpeechDenoiserModelConfig(
+                    gtcrn=sherpa_onnx.OfflineSpeechDenoiserGtcrnModelConfig(model=model_path),
+                    num_threads=max(1, min(4, os.cpu_count() or 2)),
+                    provider="cpu",
+                    debug=False,
+                )
+            )
+            denoiser = sherpa_onnx.OfflineSpeechDenoiser(cfg)
+            _DENOISER_CACHE[model_path] = denoiser
+        samples, rate = read_wav_float32(base_wav)
+        audio = denoiser.run(samples, int(rate))
+        write_wav_s16(out_wav, audio.samples, int(audio.sample_rate))
+        return True
+    except Exception as exc:
+        if log:
+            log(f"    ⚠ GTCRN 降噪失败：{exc}\n", True)
+        return False
+
+
+def prepare_asr_audio(ffmpeg: str, src: str, mode: str, workdir: str, log=None) -> str:
+    """统一用 FFmpeg 解码成 Whisper 需要的 16k 单声道 WAV，可先降噪。
+
+    这样做同时规避了 faster-whisper 内置 PyAV 解码与新版 av 接口不兼容的问题。
+    返回 WAV 路径；失败返回空串。
+    """
+    out_wav = os.path.join(workdir, "asr_input.wav")
+
+    if mode == "arnndn":
+        model_path = ensure_denoise_model("arnndn", log)
+        chain = "highpass=f=80"
+        if model_path:
+            chain += (
+                ",aresample=48000,arnndn=m='"
+                + filter_escape_path(model_path)
+                + "',aresample=16000"
+            )
+        else:
+            chain += ",aresample=16000"
+        ok, err = decode_to_wav(ffmpeg, src, out_wav, chain)
+        if not ok:
+            if log:
+                log(f"    ⚠ RNNoise 降噪失败：{err.strip()[:200]}\n", True)
+            return ""
+        return out_wav
+
+    if mode == "gtcrn":
+        # 依赖缺失时自动退回 RNNoise，保证任务不中断
+        model_path = ensure_denoise_model("gtcrn", log)
+        if not model_path or not module_available("sherpa_onnx"):
+            if log:
+                log("    ⚠ 缺少 sherpa-onnx 或 GTCRN 模型，已自动回退 RNNoise。\n", True)
+            return prepare_asr_audio(ffmpeg, src, "arnndn", workdir, log)
+        base_wav = os.path.join(workdir, "decoded.wav")
+        ok, err = decode_to_wav(ffmpeg, src, base_wav)
+        if not ok:
+            if log:
+                log(f"    ⚠ 音频解码失败：{err.strip()[:200]}\n", True)
+            return ""
+        return out_wav if _run_gtcrn(base_wav, out_wav, model_path, log) else ""
+
+    # 不降噪：仅解码为 16k 单声道 WAV
+    ok, err = decode_to_wav(ffmpeg, src, out_wav)
+    if not ok:
+        if log:
+            log(f"    ⚠ 音频解码失败：{err.strip()[:200]}\n", True)
+        return ""
+    return out_wav
+
+
+def get_whisper_model(model_name: str, log=None):
+    """加载并缓存 Whisper 模型（同一时间只保留一个，避免内存叠加）。"""
+    model = _WHISPER_CACHE.get(model_name)
+    if model is not None:
+        return model
+    from faster_whisper import WhisperModel
+
+    for key in list(_WHISPER_CACHE):
+        if key != model_name:
+            _WHISPER_CACHE.pop(key, None)
+
+    root = str(models_root() / "whisper")
+    os.makedirs(root, exist_ok=True)
+    if not whisper_model_ready(model_name) and log:
+        log("    ⏬ 首次使用该模型，正在下载权重（大文件，请耐心等待）…\n")
+        log("       如下载缓慢，可设置环境变量 HF_ENDPOINT=https://hf-mirror.com 后重试。\n")
+    model = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=root)
+    _WHISPER_CACHE[model_name] = model
+    if log:
+        log("    ✅ 识别模型已加载。\n")
+    return model
+
+
+def transcribe_audio(audio_path: str, model_name: str, language, duration: float,
+                     on_progress, should_stop, log=None):
+    """转写 16k 单声道 WAV，返回 (segments, info)。segments 为 [{start, end, text}]。"""
+    model = get_whisper_model(model_name, log)
+    samples, rate = read_wav_float32(audio_path)
+    if int(rate) != 16000:
+        raise ValueError(f"输入音频采样率必须为 16kHz，当前为 {rate}Hz")
+    # 直接传 numpy 数组，绕开 faster-whisper 内置的 PyAV 解码路径
+    segments, info = model.transcribe(
+        samples,
+        language=language,
+        beam_size=5,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 400, "speech_pad_ms": 200},
+        condition_on_previous_text=False,
+        no_speech_threshold=0.6,
+        word_timestamps=False,
+    )
+    result = []
+    for seg in segments:
+        if should_stop():
+            break
+        text = (seg.text or "").strip()
+        if text:
+            result.append({"start": float(seg.start), "end": float(seg.end), "text": text})
+        if duration > 0 and on_progress:
+            on_progress(min(99.0, max(0.0, float(seg.end) / duration * 100.0)))
+    if on_progress:
+        on_progress(99.0 if result else 0.0)
+    return result, info
+
+
+def format_timestamp(seconds: float) -> str:
+    total_ms = int(round(max(0.0, seconds) * 1000))
+    hours, rem = divmod(total_ms, 3600000)
+    minutes, rem = divmod(rem, 60000)
+    secs, millis = divmod(rem, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def char_width(ch: str) -> int:
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
+def display_width(text: str) -> int:
+    return sum(char_width(ch) for ch in text)
+
+
+def wrap_subtitle(text: str, limit: int = 42, max_lines: int = 3):
+    """按显示宽度折行：中文占 2 宽度，英文占 1，优先在空格处断开。"""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if not text:
+        return []
+    if display_width(text) <= limit:
+        return [text]
+    lines, current, width = [], [], 0
+    for ch in text:
+        w = char_width(ch)
+        if width + w > limit and current:
+            line = "".join(current)
+            if " " in line:
+                head, tail = line.rsplit(" ", 1)
+                if head.strip() and tail:
+                    lines.append(head.strip())
+                    current = list(tail)
+                    width = display_width(tail)
+                    if ch != " ":
+                        current.append(ch)
+                        width += w
+                    continue
+            lines.append(line.strip())
+            current = [] if ch == " " else [ch]
+            width = 0 if ch == " " else w
+        else:
+            current.append(ch)
+            width += w
+    if current:
+        lines.append("".join(current).strip())
+    return [ln for ln in lines if ln][:max_lines]
+
+
+def write_srt(segments, path: str) -> None:
+    blocks = []
+    for index, seg in enumerate(segments, start=1):
+        start = max(0.0, seg["start"])
+        end = max(start + 0.2, seg["end"])
+        lines = wrap_subtitle(seg["text"])
+        if not lines:
+            continue
+        blocks.append(str(index))
+        blocks.append(f"{format_timestamp(start)} --> {format_timestamp(end)}")
+        blocks.extend(lines)
+        blocks.append("")
+    Path(path).write_text("\n".join(blocks) + "\n", encoding="utf-8")
+
+
+def _is_cjk(ch: str) -> bool:
+    return unicodedata.east_asian_width(ch) in ("W", "F")
+
+
+def write_txt(segments, path: str) -> None:
+    parts = []
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        if parts and not (_is_cjk(parts[-1][-1]) or _is_cjk(text[0])):
+            parts.append(" ")
+        parts.append(text)
+    Path(path).write_text("".join(parts) + "\n", encoding="utf-8")
+
+
 # ==================== GUI ====================
 class AudioToVideoApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(f"{APP_TITLE} v{APP_VERSION}")
-        self.root.geometry("880x720")
-        self.root.minsize(780, 620)
+        self.root.geometry("940x820")
+        self.root.minsize(860, 740)
         self.root.configure(bg="#1E1E1E")
 
         self.cfg = load_config()
@@ -301,6 +685,14 @@ class AudioToVideoApp:
         self.progress_var = tk.DoubleVar(value=0.0)
         self.stage_var = tk.StringVar(value="就绪")
 
+        self.stt_var = tk.BooleanVar(value=bool(self.cfg.get("stt_enabled", False)))
+        self.stt_model_var = tk.StringVar(value=self._label_from_value(
+            STT_MODELS, self.cfg.get("stt_model", DEFAULT_STT_MODEL)))
+        self.stt_lang_var = tk.StringVar(value=self._label_from_value(
+            STT_LANGS, self.cfg.get("stt_language", DEFAULT_STT_LANG)))
+        self.denoise_var = tk.StringVar(value=self._label_from_value(
+            DENOISE_MODES, self.cfg.get("denoise_mode", DEFAULT_DENOISE)))
+
         self.setup_ui()
         self._restore_saved_selection()
         self.root.after(100, self.refresh_ffmpeg)
@@ -313,14 +705,38 @@ class AudioToVideoApp:
                 return label
         return next(k for k, v in SIZE_MODES.items() if v == DEFAULT_MODE)
 
+    @staticmethod
+    def _label_from_value(mapping: dict, value) -> str:
+        for label, val in mapping.items():
+            if val == value:
+                return label
+        return next(iter(mapping))
+
     def _persist(self):
         self.cfg.update({
             "ffmpeg_path": self.ffmpeg_path,
             "image_path": self.image_path,
             "output_dir": self.output_dir,
             "size_mode": SIZE_MODES.get(self.size_var.get(), DEFAULT_MODE),
+            "stt_enabled": bool(self.stt_var.get()),
+            "stt_model": STT_MODELS.get(self.stt_model_var.get(), DEFAULT_STT_MODEL),
+            "stt_language": STT_LANGS.get(self.stt_lang_var.get(), DEFAULT_STT_LANG),
+            "denoise_mode": DENOISE_MODES.get(self.denoise_var.get(), DEFAULT_DENOISE),
         })
         save_config(self.cfg)
+
+    def _on_stt_toggle(self):
+        self._persist()
+        self._sync_stt_state()
+
+    def _sync_stt_state(self):
+        enabled = bool(self.stt_var.get()) and not self._busy
+        state = "readonly" if enabled else tk.DISABLED
+        for widget in (getattr(self, "cmb_model", None),
+                       getattr(self, "cmb_lang", None),
+                       getattr(self, "cmb_denoise", None)):
+            if widget is not None:
+                widget.config(state=state)
 
     def _restore_saved_selection(self):
         saved_image = self.cfg.get("image_path", "")
@@ -399,6 +815,43 @@ class AudioToVideoApp:
         tk.Label(row4, text="（非 16:9 封面会等比缩放并补黑边）", bg="#1E1E1E", fg="#777777",
                  font=("Microsoft YaHei", 8)).pack(side="left", padx=6)
 
+        # --- 语音识别 / 降噪 ---
+        row5 = tk.Frame(control, bg="#1E1E1E")
+        row5.pack(fill="x", pady=(8, 2))
+        self.chk_stt = tk.Checkbutton(
+            row5, text="🎧 识别语音并生成字幕（.srt + .txt）", variable=self.stt_var,
+            command=self._on_stt_toggle, bg="#1E1E1E", fg="#CCCCCC",
+            selectcolor="#2D2D30", activebackground="#1E1E1E", activeforeground="white",
+            font=("Microsoft YaHei", 9, "bold"), anchor="w",
+        )
+        self.chk_stt.pack(side="left")
+        tk.Label(row5, text="识别模型：", bg="#1E1E1E", fg="#CCCCCC",
+                 font=("Microsoft YaHei", 9)).pack(side="left", padx=(18, 0))
+        self.cmb_model = ttk.Combobox(row5, textvariable=self.stt_model_var, state="readonly",
+                                      values=list(STT_MODELS.keys()), width=30,
+                                      font=("Microsoft YaHei", 9))
+        self.cmb_model.pack(side="left", padx=6)
+        self.cmb_model.bind("<<ComboboxSelected>>", lambda _e: self._persist())
+
+        row6 = tk.Frame(control, bg="#1E1E1E")
+        row6.pack(fill="x", pady=(2, 0))
+        tk.Label(row6, text="识别语种：", bg="#1E1E1E", fg="#CCCCCC",
+                 font=("Microsoft YaHei", 9)).pack(side="left", padx=(28, 0))
+        self.cmb_lang = ttk.Combobox(row6, textvariable=self.stt_lang_var, state="readonly",
+                                     values=list(STT_LANGS.keys()), width=18,
+                                     font=("Microsoft YaHei", 9))
+        self.cmb_lang.pack(side="left", padx=6)
+        self.cmb_lang.bind("<<ComboboxSelected>>", lambda _e: self._persist())
+        tk.Label(row6, text="降噪：", bg="#1E1E1E", fg="#CCCCCC",
+                 font=("Microsoft YaHei", 9)).pack(side="left", padx=(14, 0))
+        self.cmb_denoise = ttk.Combobox(row6, textvariable=self.denoise_var, state="readonly",
+                                        values=list(DENOISE_MODES.keys()), width=24,
+                                        font=("Microsoft YaHei", 9))
+        self.cmb_denoise.pack(side="left", padx=6)
+        self.cmb_denoise.bind("<<ComboboxSelected>>", lambda _e: self._persist())
+        tk.Label(row6, text="（降噪只用于识别，不改动成片音轨）", bg="#1E1E1E", fg="#777777",
+                 font=("Microsoft YaHei", 8)).pack(side="left", padx=6)
+
         # --- 执行区 ---
         exec_frame = tk.Frame(self.root, bg="#1E1E1E")
         exec_frame.pack(fill="x", padx=20, pady=(0, 8))
@@ -434,9 +887,19 @@ class AudioToVideoApp:
         self.text_area.tag_config("error", foreground="#FF4500")
         self.text_area.tag_config("info", foreground="#5CB3FF")
 
-        self.log(f">>> 欢迎使用 {APP_TITLE} v{APP_VERSION}（FFmpeg 引擎）。\n")
+        self.log(f">>> 欢迎使用 {APP_TITLE} v{APP_VERSION}（FFmpeg 引擎 + 语音识别）。\n")
         self.log(">>> 渲染逻辑：1 帧/秒，视频极小，音频保持原样重编码为 AAC 192k。\n")
-        self.log(">>> 支持 " + " / ".join(e.lstrip(".").upper() for e in AUDIO_EXTS[:10]) + " 等格式。\n\n")
+        self.log(">>> 支持 " + " / ".join(e.lstrip(".").upper() for e in AUDIO_EXTS[:10]) + " 等格式。\n")
+        if module_available("faster_whisper"):
+            self.log(">>> 🎧 语音识别：faster-whisper 已就绪（首次使用会下载所选模型）。\n")
+        else:
+            self.log(">>> ⚠ 未安装 faster-whisper，字幕功能不可用。"
+                     "安装：python -m pip install faster-whisper sherpa-onnx\n", is_error=True)
+        if module_available("sherpa_onnx"):
+            self.log(">>> 🧹 降噪：RNNoise 与 GTCRN 均可使用。\n\n")
+        else:
+            self.log(">>> 🧹 降噪：RNNoise 可用；GTCRN 需 python -m pip install sherpa-onnx。\n\n")
+        self._sync_stt_state()
 
     # ---------- 日志 / 进度 ----------
     def log(self, text, is_error=False):
@@ -541,14 +1004,16 @@ class AudioToVideoApp:
     def lock_ui(self, locked: bool):
         self._busy = locked
         state = tk.DISABLED if locked else tk.NORMAL
-        for button in (self.btn_audio, self.btn_img, self.btn_dir, self.btn_engine, self.btn_redetect, self.cmb_size):
+        for button in (self.btn_audio, self.btn_img, self.btn_dir, self.btn_engine,
+                       self.btn_redetect, self.cmb_size, self.chk_stt):
             button.config(state=state)
         if locked:
-            self.btn_start.config(state=tk.DISABLED, text="⏳ 正在转换...")
+            self.btn_start.config(state=tk.DISABLED, text="⏳ 正在处理...")
             self.btn_cancel.config(state=tk.NORMAL)
         else:
             self.btn_start.config(state=tk.NORMAL, text="4. ▶ 开始批量转换")
             self.btn_cancel.config(state=tk.DISABLED)
+        self._sync_stt_state()
 
     def start_processing(self):
         if not self.ffmpeg_path:
@@ -564,11 +1029,26 @@ class AudioToVideoApp:
         if not self.output_dir:
             self.output_dir = os.path.dirname(self.audio_files[0])
             self.lbl_dir.config(text=self.output_dir, fg="#4AF626")
+        if self.stt_var.get() and not module_available("faster_whisper"):
+            messagebox.showerror(
+                "缺少语音识别依赖",
+                "未检测到 faster-whisper，无法生成字幕。\n\n请先安装一次依赖（约 200 MB）：\n\n"
+                f'"{sys.executable}" -m pip install faster-whisper sherpa-onnx',
+            )
+            return
 
         self._stop = False
         self.progress_var.set(0)
         self.lock_ui(True)
         self.log("=" * 64 + "\n")
+        if self.stt_var.get():
+            model_name = STT_MODELS.get(self.stt_model_var.get(), DEFAULT_STT_MODEL)
+            if not whisper_model_ready(model_name):
+                size_text = self.stt_model_var.get().split("（")[-1].split(" · ")[0]
+                self.log(f">>> ⏬ 首次使用 {model_name}，需先下载约 {size_text} 模型，"
+                         "耗时取决于网速。\n")
+            self.log(">>> 🎧 已启用字幕生成，降噪模式："
+                     f"{self.denoise_var.get()}。\n")
         self.log(f">>> 🚀 开始批量转换，共 {len(self.audio_files)} 个文件。\n\n")
         threading.Thread(target=self._worker, daemon=True).start()
 
@@ -583,8 +1063,67 @@ class AudioToVideoApp:
             except Exception:
                 pass
 
+    def _run_stt(self, audio_path, out_path, model_name, lang, denoise_mode,
+                 duration, index, total, base_name):
+        """降噪 + 转写 + 写出 SRT/TXT；任何异常都不影响后续视频渲染。"""
+        workdir = tempfile.mkdtemp(prefix="mp3tom4_asr_")
+        sub_base = os.path.splitext(out_path)[0]
+        started = time.time()
+        try:
+            if denoise_mode != "off":
+                self.set_stage(f"第 {index}/{total} 个 · {base_name} · 降噪")
+                self.log(f"  🧹 降噪中（{self.denoise_var.get()}）...\n")
+            else:
+                self.set_stage(f"第 {index}/{total} 个 · {base_name} · 音频预处理")
+            asr_input = prepare_asr_audio(
+                self.ffmpeg_path, audio_path, denoise_mode, workdir, self.log)
+            if not asr_input:
+                self.log("  ⚠ 音频预处理失败，跳过字幕生成。\n", is_error=True)
+                return
+            if self._stop:
+                return
+
+            self.set_stage(f"第 {index}/{total} 个 · {base_name} · 语音识别")
+            self.log(f"  🎧 识别中（{model_name} · {self.stt_lang_var.get()}）...\n")
+            segments, info = transcribe_audio(
+                asr_input, model_name, lang, duration,
+                on_progress=lambda p: self.set_progress(p * 0.7),
+                should_stop=lambda: self._stop,
+                log=self.log,
+            )
+            if self._stop:
+                return
+            if not segments:
+                self.log("  ⚠ 未识别到有效语音，未生成字幕。\n", is_error=True)
+                return
+
+            srt_path = sub_base + ".srt"
+            txt_path = sub_base + ".txt"
+            write_srt(segments, srt_path)
+            write_txt(segments, txt_path)
+            lang_name = getattr(info, "language", "?")
+            try:
+                prob = float(getattr(info, "language_probability", 0.0) or 0.0)
+            except Exception:
+                prob = 0.0
+            self.log(
+                f"  ✅ 字幕已生成：{len(segments)} 条 · 语种 {lang_name} ({prob:.0%}) · "
+                f"耗时 {time.time() - started:.0f}s\n"
+                f"     → {os.path.basename(srt_path)} / {os.path.basename(txt_path)}\n"
+            )
+        except Exception as exc:
+            self.log(f"  ❌ 语音识别失败：{exc}\n", is_error=True)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
     def _worker(self):
         mode = SIZE_MODES.get(self.size_var.get(), DEFAULT_MODE)
+        stt_on = bool(self.stt_var.get())
+        model_name = STT_MODELS.get(self.stt_model_var.get(), DEFAULT_STT_MODEL)
+        lang = STT_LANGS.get(self.stt_lang_var.get(), DEFAULT_STT_LANG)
+        if lang == "auto":
+            lang = None
+        denoise_mode = DENOISE_MODES.get(self.denoise_var.get(), DEFAULT_DENOISE)
         total = len(self.audio_files)
         success = failed = 0
 
@@ -603,12 +1142,29 @@ class AudioToVideoApp:
             if duration <= 0:
                 self.log("  ⚠ 无法读取时长，进度条将不准确（不影响转换）。\n")
 
+            if stt_on and not self._stop:
+                self._run_stt(audio_path, out_path, model_name, lang, denoise_mode,
+                              duration, index, total, base_name)
+                self.set_progress(70.0)
+                self.set_stage(f"第 {index}/{total} 个 · {base_name} · 渲染视频")
+
+            if self._stop:
+                if os.path.exists(out_path):
+                    try:
+                        os.remove(out_path)
+                    except Exception:
+                        pass
+                self.log("  🛑 已取消。\n", is_error=True)
+                break
+
             self._proc = None
-            started = threading.Event()
+
+            def on_encode_progress(p, stt=stt_on):
+                self.set_progress(70.0 + p * 0.3 if stt else p)
 
             rc, err = convert_one(
                 self.ffmpeg_path, audio_path, self.image_path, out_path, mode, duration,
-                on_progress=self.set_progress,
+                on_progress=on_encode_progress,
                 should_stop=lambda: self._stop,
             )
 
