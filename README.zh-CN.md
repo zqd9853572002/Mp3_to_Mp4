@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-![CI](https://github.com/YOUR_USERNAME/Mp3_to_Mp4/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/zqd9853572002/Mp3_to_Mp4/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
@@ -92,7 +92,7 @@ Mp3 to MP4 是一个 Windows 桌面工具：把音频文件配上静态封面图
 ### 方式一：克隆后直接运行
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/Mp3_to_Mp4.git
+git clone https://github.com/zqd9853572002/Mp3_to_Mp4.git
 cd Mp3_to_Mp4
 pip install -r requirements.txt
 python MP3toMP4.py

@@ -3,17 +3,19 @@
 # 版本号唯一来源：mp3tom4/config.py 的 APP_VERSION，此处保持同步。
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mp3tom4"
 version = "5.0.0"
-requires-python = ">=3.10"
-description = "Batch audio-to-MP4 engine with subtitle generation, denoising and a trilingual Tkinter UI"
+description = "Turn audio into MP4 with a cover image — speech-to-text subtitles (SRT/TXT) and neural noise reduction, in a trilingual Windows desktop app."
 readme = "README.md"
-license = { text = "GPL-3.0-or-later" }
-keywords = ["ffmpeg", "mp4", "whisper", "speech-to-text", "denoise", "tkinter"]
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "ZQD" }]
+keywords = ["mp3", "mp4", "whisper", "speech-to-text", "subtitle", "noise-reduction", "ffmpeg", "tkinter", "windows"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Win32 (MS Windows)",
@@ -28,12 +30,6 @@ classifiers = [
     "Topic :: Multimedia :: Video",
     "Topic :: Multimedia :: Sound/Audio",
 ]
-
-# TODO(维护者): 取消注释并填入 GitHub 用户名与邮箱后发布。
-# authors = [
-#     { name = "<your-github-username>", email = "<you@example.com>" },
-# ]
-authors = []
 
 # 必需依赖：与 requirements.txt 的「必需」区块保持一致
 dependencies = [
@@ -59,12 +55,10 @@ mp3tom4 = "mp3tom4.app:main"
 [project.gui-scripts]
 mp3tom4-gui = "mp3tom4.app:main"
 
-# TODO(维护者): 取消注释并填入实际链接后发布。
-# [project.urls]
-# Homepage = "https://github.com/<your-github-username>/Py_Mp3_to_Mp4"
-# Source = "https://github.com/<your-github-username>/Py_Mp3_to_Mp4"
-# Issues = "https://github.com/<your-github-username>/Py_Mp3_to_Mp4/issues"
-# Changelog = "https://github.com/<your-github-username>/Py_Mp3_to_Mp4/blob/main/CHANGELOG.md"
+[project.urls]
+Homepage = "https://github.com/zqd9853572002/Mp3_to_Mp4"
+Repository = "https://github.com/zqd9853572002/Mp3_to_Mp4"
+Issues = "https://github.com/zqd9853572002/Mp3_to_Mp4/issues"
 
 [tool.setuptools.packages.find]
 include = ["mp3tom4*"]
