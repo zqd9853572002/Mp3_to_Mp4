@@ -23,6 +23,7 @@ from .ffmpeg import (
     run_ffmpeg_stream,
     run_quiet,
 )
+from .i18n import t
 
 _DENOISER_CACHE = {}
 
@@ -34,12 +35,14 @@ def ensure_denoise_model(mode: str, log=None) -> str:
         dest = cache / "bd.rnnn"
         if dest.is_file() and dest.stat().st_size > 100_000:
             return str(dest)
-        return str(dest) if download_file(RNNOISE_URL, dest, log, "RNNoise 模型") else ""
+        return str(dest) if download_file(
+            RNNOISE_URL, dest, log, t("model.rnnoise")) else ""
     if mode == "gtcrn":
         dest = cache / "gtcrn_simple.onnx"
         if dest.is_file() and dest.stat().st_size > 400_000:
             return str(dest)
-        return str(dest) if download_file(GTCRN_URL, dest, log, "GTCRN 模型") else ""
+        return str(dest) if download_file(
+            GTCRN_URL, dest, log, t("model.gtcrn")) else ""
     return ""
 
 
@@ -51,9 +54,9 @@ def decode_to_wav(ffmpeg: str, src: str, dst: str, audio_filter: str = ""):
     cmd += ["-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", dst]
     res = run_quiet(cmd, timeout=3600)
     if res is None:
-        return False, "ffmpeg 无法启动"
+        return False, t("err.ffmpeg_launch")
     if res.returncode != 0:
-        return False, (res.stderr or res.stdout or "ffmpeg 解码失败")
+        return False, (res.stderr or res.stdout or t("err.ffmpeg_decode"))
     return True, ""
 
 
@@ -118,7 +121,7 @@ def _run_gtcrn(base_wav: str, out_wav: str, model_path: str, log=None) -> bool:
         return True
     except Exception as exc:
         if log:
-            log(f"    ⚠ GTCRN 降噪失败：{exc}\n", True)
+            log(t("log.gtcrn_failed", exc=exc), True)
         return False
 
 
@@ -144,7 +147,7 @@ def prepare_asr_audio(ffmpeg: str, src: str, mode: str, workdir: str, log=None) 
         ok, err = decode_to_wav(ffmpeg, src, out_wav, chain)
         if not ok:
             if log:
-                log(f"    ⚠ RNNoise 降噪失败：{err.strip()[:200]}\n", True)
+                log(t("log.rnnoise_failed", err=err.strip()[:200]), True)
             return ""
         return out_wav
 
@@ -153,13 +156,13 @@ def prepare_asr_audio(ffmpeg: str, src: str, mode: str, workdir: str, log=None) 
         model_path = ensure_denoise_model("gtcrn", log)
         if not model_path or not module_available("sherpa_onnx"):
             if log:
-                log("    ⚠ 缺少 sherpa-onnx 或 GTCRN 模型，已自动回退 RNNoise。\n", True)
+                log(t("log.gtcrn_fallback"), True)
             return prepare_asr_audio(ffmpeg, src, "arnndn", workdir, log)
         base_wav = os.path.join(workdir, "decoded.wav")
         ok, err = decode_to_wav(ffmpeg, src, base_wav)
         if not ok:
             if log:
-                log(f"    ⚠ 音频解码失败：{err.strip()[:200]}\n", True)
+                log(t("log.decode_failed", err=err.strip()[:200]), True)
             return ""
         return out_wav if _run_gtcrn(base_wav, out_wav, model_path, log) else ""
 
@@ -167,7 +170,7 @@ def prepare_asr_audio(ffmpeg: str, src: str, mode: str, workdir: str, log=None) 
     ok, err = decode_to_wav(ffmpeg, src, out_wav)
     if not ok:
         if log:
-            log(f"    ⚠ 音频解码失败：{err.strip()[:200]}\n", True)
+            log(t("log.decode_failed", err=err.strip()[:200]), True)
         return ""
     return out_wav
 
@@ -194,14 +197,15 @@ def render_denoised_audio(ffmpeg, src, out_wav, mode, should_stop, log,
             remove_file_quiet(tmp_out)
             if code != 0 and log and err:
                 last = [ln for ln in err.splitlines() if ln.strip()]
-                log(f"    ⚠ 降噪失败：{(last[-1] if last else '未知错误')[:200]}\n", True)
+                detail = last[-1] if last else t("label.unknown_error")
+                log(t("log.denoise_failed_detail", err=detail[:200]), True)
             return False
         try:
             os.replace(tmp_out, out_wav)
         except Exception as exc:
             remove_file_quiet(tmp_out)
             if log:
-                log(f"    ⚠ 降噪结果写入失败：{exc}\n", True)
+                log(t("log.denoise_write_failed", exc=exc), True)
             return False
         report(100.0)
         return True
@@ -210,18 +214,18 @@ def render_denoised_audio(ffmpeg, src, out_wav, mode, should_stop, log,
         model_path = ensure_denoise_model("gtcrn", log)
         if not model_path or not module_available("sherpa_onnx"):
             if log:
-                log("    ⚠ 缺少 sherpa-onnx 或 GTCRN 模型，已自动回退 RNNoise。\n", True)
+                log(t("log.gtcrn_fallback"), True)
             return render_denoised_audio(ffmpeg, src, out_wav, "arnndn",
                                          should_stop, log, progress_cb, on_proc)
         workdir = tempfile.mkdtemp(prefix="mp3tomp4_denoise_")
         try:
             if log:
-                log("    ℹ 强力降噪按 16k 单声道处理后再上采样到 48kHz，高频会有损失。\n")
+                log(t("log.gtcrn_upsample_note"))
             base_wav = os.path.join(workdir, "decoded.wav")
             ok, err = decode_to_wav(ffmpeg, src, base_wav)
             if not ok:
                 if log:
-                    log(f"    ⚠ 音频解码失败：{err.strip()[:200]}\n", True)
+                    log(t("log.decode_failed", err=err.strip()[:200]), True)
                 return False
             if should_stop():
                 return False
@@ -230,7 +234,7 @@ def render_denoised_audio(ffmpeg, src, out_wav, mode, should_stop, log,
             den_wav = os.path.join(workdir, "denoised.wav")
             if not _run_gtcrn(base_wav, den_wav, model_path, log):
                 if log:
-                    log("    ⚠ GTCRN 处理失败，已自动回退 RNNoise。\n", True)
+                    log(t("log.gtcrn_process_fallback"), True)
                 return render_denoised_audio(ffmpeg, src, out_wav, "arnndn",
                                              should_stop, log, progress_cb, on_proc)
             report(60.0)
@@ -257,7 +261,7 @@ def render_denoised_audio(ffmpeg, src, out_wav, mode, should_stop, log,
     if model_path:
         chain += ",aresample=48000,arnndn=m='" + filter_escape_path(model_path) + "'"
     elif log:
-        log("    ⚠ RNNoise 模型不可用，本次仅做高通滤波。\n", True)
+        log(t("log.rnnoise_missing"), True)
     chain += ",aresample=48000"
 
     cmd = [

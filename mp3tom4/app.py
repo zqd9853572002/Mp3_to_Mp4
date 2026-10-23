@@ -9,6 +9,7 @@ import traceback
 import tkinter as tk
 from tkinter import messagebox
 
+from .i18n import t
 from .ui.main_window import AudioToVideoApp
 
 
@@ -33,7 +34,7 @@ def _start() -> None:
     def report_exception(exc, value, tb):
         detail = "".join(traceback.format_exception(exc, value, tb))
         try:
-            messagebox.showerror("程序异常", detail[-1500:])
+            messagebox.showerror(t("dlg.app_error_title"), detail[-1500:])
         except Exception:
             print(detail)
 
@@ -52,7 +53,7 @@ def main() -> None:
         try:
             fallback = tk.Tk()
             fallback.withdraw()
-            messagebox.showerror("启动失败", trace[-1500:])
+            messagebox.showerror(t("dlg.startup_failed_title"), trace[-1500:])
             fallback.destroy()
         except Exception:
             pass

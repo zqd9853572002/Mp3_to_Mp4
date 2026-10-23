@@ -12,15 +12,21 @@ FG_CAPTION = "#CCCCCC"
 FONT_UI = ("Microsoft YaHei", 9)
 
 
-def group(parent, title, bg=BG_PANEL, border="#3C3C3C", title_fg=FG_TITLE):
-    """带边框的分组容器，返回可放行的内层 Frame。"""
+def group(parent, title=None, bg=BG_PANEL, border="#3C3C3C", title_fg=FG_TITLE,
+          title_var=None):
+    """带边框的分组容器，返回可放行的内层 Frame。
+
+    `title_var` 传入 StringVar 时标题随语言切换自动更新（优先于 `title`）。
+    """
     outer = tk.Frame(parent, bg=bg, highlightbackground=border,
                      highlightthickness=1)
     outer.pack(fill="x", padx=20, pady=(0, 8))
     inner = tk.Frame(outer, bg=bg)
     inner.pack(fill="x", padx=10, pady=8)
-    tk.Label(inner, text=title, bg=bg, fg=title_fg, anchor="w",
-             font=("Microsoft YaHei", 9, "bold")).pack(fill="x", pady=(0, 4))
+    label_kwargs = {"textvariable": title_var} if title_var is not None else {"text": title}
+    tk.Label(inner, bg=bg, fg=title_fg, anchor="w",
+             font=("Microsoft YaHei", 9, "bold"), **label_kwargs).pack(
+        fill="x", pady=(0, 4))
     return inner
 
 
@@ -31,15 +37,22 @@ def row(parent, bg=BG_PANEL):
     return container
 
 
-def caption(parent, text, bg=BG_PANEL, fg=FG_CAPTION, width=9):
-    """行首的固定宽度说明文字。"""
-    return tk.Label(parent, text=text, bg=bg, fg=fg, width=width,
-                    anchor="w", font=FONT_UI)
+def caption(parent, text=None, bg=BG_PANEL, fg=FG_CAPTION, width=9,
+            textvariable=None):
+    """行首的固定宽度说明文字。
+
+    `textvariable` 传入 StringVar 时文案随语言切换自动更新。
+    """
+    kwargs = {"textvariable": textvariable} if textvariable is not None else {"text": text}
+    return tk.Label(parent, bg=bg, fg=fg, width=width,
+                    anchor="w", font=FONT_UI, **kwargs)
 
 
-def checkbutton(parent, text, variable, command=None, bg=BG_PANEL):
+def checkbutton(parent, text=None, variable=None, command=None, bg=BG_PANEL,
+                textvariable=None):
     """深色主题复选框（统一样式，避免各处参数漂移）。"""
+    kwargs = {"textvariable": textvariable} if textvariable is not None else {"text": text}
     return tk.Checkbutton(
-        parent, text=text, variable=variable, command=command, bg=bg,
+        parent, variable=variable, command=command, bg=bg,
         fg=FG_CAPTION, selectcolor="#2D2D30", activebackground=bg,
-        activeforeground="white", font=FONT_UI, anchor="w")
+        activeforeground="white", font=FONT_UI, anchor="w", **kwargs)

@@ -8,6 +8,7 @@ import os
 
 from .config import models_root
 from .denoise import read_wav_float32
+from .i18n import t
 
 _WHISPER_CACHE = {}
 
@@ -37,12 +38,12 @@ def get_whisper_model(model_name: str, log=None):
     root = str(models_root() / "whisper")
     os.makedirs(root, exist_ok=True)
     if not whisper_model_ready(model_name) and log:
-        log("    ⏬ 首次使用该模型，正在下载权重（大文件，请耐心等待）…\n")
-        log("       如下载缓慢，可设置环境变量 HF_ENDPOINT=https://hf-mirror.com 后重试。\n")
+        log(t("log.model_downloading"))
+        log(t("log.model_mirror_hint"))
     model = WhisperModel(model_name, device="cpu", compute_type="int8", download_root=root)
     _WHISPER_CACHE[model_name] = model
     if log:
-        log("    ✅ 识别模型已加载。\n")
+        log(t("log.model_loaded"))
     return model
 
 
@@ -52,7 +53,7 @@ def transcribe_audio(audio_path: str, model_name: str, language, duration: float
     model = get_whisper_model(model_name, log)
     samples, rate = read_wav_float32(audio_path)
     if int(rate) != 16000:
-        raise ValueError(f"输入音频采样率必须为 16kHz，当前为 {rate}Hz")
+        raise ValueError(t("err.sample_rate", rate=rate))
     # 直接传 numpy 数组，绕开 faster-whisper 内置的 PyAV 解码路径
     segments, info = model.transcribe(
         samples,
