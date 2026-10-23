@@ -107,6 +107,21 @@ def test_set_language_normalizes_locale_variants():
     assert i18n.set_language("en-US", persist=False) == "en"
 
 
+def test_first_launch_defaults_to_simplified_chinese(monkeypatch, tmp_path):
+    """首次启动（无 ui_language 配置）一律简体中文，不再跟随系统语言。
+
+    本机系统语言是 en-US，旧行为会让中文用户第一次打开就看到英文界面。
+    """
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    reloaded = importlib.reload(i18n)
+    try:
+        assert reloaded.get_language() == "zh_CN"
+        assert reloaded.t("btn.cancel") == reloaded.text_for("zh_CN", "btn.cancel")
+    finally:
+        importlib.reload(i18n)
+        i18n.set_language("zh_CN", persist=False)
+
+
 # ==================== 持久化 ====================
 def test_language_choice_is_persisted_and_reloaded(monkeypatch, tmp_path):
     """切换后配置里写 ui_language；模拟重启（重新 import）仍是该语言。"""

@@ -16,8 +16,6 @@ Design notes
 
 import json
 import logging
-import locale as _locale
-import os
 from pathlib import Path
 
 DEFAULT_LANGUAGE = "zh_CN"
@@ -69,7 +67,14 @@ def _normalize(code):
 
 
 def _detect_language():
-    """Saved preference -> system locale -> default."""
+    """Saved preference -> default.
+
+    The first launch always starts in Simplified Chinese instead of following
+    the operating-system locale: on machines whose system language is English
+    the previous behaviour opened an English window for users who only ever
+    used the Chinese UI.  Once the user picks a language explicitly the choice
+    is persisted as ``ui_language`` and wins on every later start.
+    """
     configured = None
     try:  # deferred import: config imports this module at module scope
         from .config import load_config
@@ -77,18 +82,7 @@ def _detect_language():
         configured = load_config().get("ui_language")
     except Exception:
         configured = None
-    normalized = _normalize(configured)
-    if normalized:
-        return normalized
-
-    system = ""
-    try:
-        system = _locale.getlocale()[0] or ""
-    except Exception:
-        system = ""
-    if not system:
-        system = os.environ.get("LANGUAGE") or os.environ.get("LANG") or ""
-    return _normalize(system) or DEFAULT_LANGUAGE
+    return _normalize(configured) or DEFAULT_LANGUAGE
 
 
 def _ensure_language():
