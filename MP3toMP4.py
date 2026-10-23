@@ -667,8 +667,8 @@ class AudioToVideoApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(f"{APP_TITLE} v{APP_VERSION}")
-        self.root.geometry("940x820")
-        self.root.minsize(860, 740)
+        self.root.geometry("980x900")
+        self.root.minsize(960, 900)
         self.root.configure(bg="#1E1E1E")
 
         self.cfg = load_config()
@@ -769,104 +769,141 @@ class AudioToVideoApp:
                                       command=self.refresh_ffmpeg)
         self.btn_redetect.pack(side="right", padx=(0, 6))
 
-        # --- 控制面板 ---
-        control = tk.Frame(self.root, bg="#1E1E1E", pady=16)
-        control.pack(fill="x", padx=20)
+        # --- 输入区 ---
+        input_frame = tk.Frame(self.root, bg="#252526", highlightbackground="#3C3C3C",
+                               highlightthickness=1)
+        input_frame.pack(fill="x", padx=20, pady=(4, 8))
 
-        row1 = tk.Frame(control, bg="#1E1E1E")
-        row1.pack(fill="x", pady=5)
-        self.btn_audio = tk.Button(row1, text="1. 🎵 选择批量音频文件", font=("Microsoft YaHei", 10, "bold"),
-                                   bg="#007ACC", fg="white", width=26, relief="flat",
+        tk.Label(input_frame, text="输入", bg="#252526", fg="#CCCCCC", anchor="w",
+                 font=("Microsoft YaHei", 9, "bold")).pack(fill="x", padx=10, pady=(6, 0))
+
+        in_row1 = tk.Frame(input_frame, bg="#252526")
+        in_row1.pack(fill="x", padx=10, pady=4)
+        tk.Label(in_row1, text="音频", bg="#252526", fg="#CCCCCC", width=8, anchor="w",
+                 font=("Microsoft YaHei", 9)).pack(side="left")
+        self.btn_audio = tk.Button(in_row1, text="选择音频", font=("Microsoft YaHei", 9, "bold"),
+                                   bg="#007ACC", fg="white", activebackground="#005A9E",
+                                   activeforeground="white", width=14, relief="flat",
                                    command=self.select_audio)
         self.btn_audio.pack(side="left")
-        self.lbl_audio = tk.Label(row1, text="未选择音频", bg="#1E1E1E", fg="#A9A9A9",
-                                  font=("Microsoft YaHei", 9))
-        self.lbl_audio.pack(side="left", padx=15)
+        self.lbl_audio = tk.Label(in_row1, text="未选择", bg="#252526", fg="#A9A9A9",
+                                  font=("Microsoft YaHei", 9), anchor="w")
+        self.lbl_audio.pack(side="left", padx=12)
 
-        row2 = tk.Frame(control, bg="#1E1E1E")
-        row2.pack(fill="x", pady=8)
-        self.btn_img = tk.Button(row2, text="2. 🖼️ 选择封面图片", font=("Microsoft YaHei", 10, "bold"),
-                                 bg="#D97706", fg="white", width=26, relief="flat",
+        in_row2 = tk.Frame(input_frame, bg="#252526")
+        in_row2.pack(fill="x", padx=10, pady=4)
+        tk.Label(in_row2, text="封面", bg="#252526", fg="#CCCCCC", width=8, anchor="w",
+                 font=("Microsoft YaHei", 9)).pack(side="left")
+        self.btn_img = tk.Button(in_row2, text="选择封面", font=("Microsoft YaHei", 9, "bold"),
+                                 bg="#D97706", fg="white", activebackground="#B45309",
+                                 activeforeground="white", width=14, relief="flat",
                                  command=self.select_image)
         self.btn_img.pack(side="left")
-        self.lbl_img = tk.Label(row2, text="未选择图片", bg="#1E1E1E", fg="#A9A9A9",
-                                font=("Microsoft YaHei", 9))
-        self.lbl_img.pack(side="left", padx=15)
+        self.lbl_img = tk.Label(in_row2, text="未选择", bg="#252526", fg="#A9A9A9",
+                                font=("Microsoft YaHei", 9), anchor="w")
+        self.lbl_img.pack(side="left", padx=12)
 
-        row3 = tk.Frame(control, bg="#1E1E1E")
-        row3.pack(fill="x", pady=5)
-        self.btn_dir = tk.Button(row3, text="3. 📁 选择 MP4 输出文件夹", font=("Microsoft YaHei", 10, "bold"),
-                                 bg="#8B5CF6", fg="white", width=26, relief="flat",
+        in_row3 = tk.Frame(input_frame, bg="#252526")
+        in_row3.pack(fill="x", padx=10, pady=4)
+        tk.Label(in_row3, text="输出目录", bg="#252526", fg="#CCCCCC", width=8, anchor="w",
+                 font=("Microsoft YaHei", 9)).pack(side="left")
+        self.btn_dir = tk.Button(in_row3, text="选择输出目录", font=("Microsoft YaHei", 9, "bold"),
+                                 bg="#8B5CF6", fg="white", activebackground="#7C3AED",
+                                 activeforeground="white", width=14, relief="flat",
                                  command=self.select_directory)
         self.btn_dir.pack(side="left")
-        self.lbl_dir = tk.Label(row3, text="未指定（默认与音频同目录）", bg="#1E1E1E", fg="#A9A9A9",
-                                font=("Microsoft YaHei", 9))
-        self.lbl_dir.pack(side="left", padx=15)
+        self.lbl_dir = tk.Label(in_row3, text="未选择", bg="#252526", fg="#A9A9A9",
+                                font=("Microsoft YaHei", 9), anchor="w")
+        self.lbl_dir.pack(side="left", padx=12)
 
-        row4 = tk.Frame(control, bg="#1E1E1E")
-        row4.pack(fill="x", pady=(10, 4))
-        tk.Label(row4, text="输出尺寸：", bg="#1E1E1E", fg="#CCCCCC",
+        # --- 选项区 ---
+        opt_frame = tk.Frame(self.root, bg="#252526", highlightbackground="#3C3C3C",
+                             highlightthickness=1)
+        opt_frame.pack(fill="x", padx=20, pady=(0, 8))
+
+        tk.Label(opt_frame, text="选项", bg="#252526", fg="#CCCCCC", anchor="w",
+                 font=("Microsoft YaHei", 9, "bold")).pack(fill="x", padx=10, pady=(6, 0))
+
+        opt_row1 = tk.Frame(opt_frame, bg="#252526")
+        opt_row1.pack(fill="x", padx=10, pady=4)
+        tk.Label(opt_row1, text="识别模型：", bg="#252526", fg="#CCCCCC",
                  font=("Microsoft YaHei", 9)).pack(side="left")
-        self.cmb_size = ttk.Combobox(row4, textvariable=self.size_var, state="readonly",
-                                     values=list(SIZE_MODES.keys()), width=24,
+        self.cmb_model = ttk.Combobox(opt_row1, textvariable=self.stt_model_var, state="readonly",
+                                      values=list(STT_MODELS.keys()), width=30,
+                                      font=("Microsoft YaHei", 9))
+        self.cmb_model.pack(side="left", padx=(4, 16))
+        self.cmb_model.bind("<<ComboboxSelected>>", lambda _e: self._persist())
+        tk.Label(opt_row1, text="识别语种：", bg="#252526", fg="#CCCCCC",
+                 font=("Microsoft YaHei", 9)).pack(side="left")
+        self.cmb_lang = ttk.Combobox(opt_row1, textvariable=self.stt_lang_var, state="readonly",
+                                     values=list(STT_LANGS.keys()), width=16,
                                      font=("Microsoft YaHei", 9))
-        self.cmb_size.pack(side="left", padx=6)
-        self.cmb_size.bind("<<ComboboxSelected>>", lambda _e: self._persist())
-        tk.Label(row4, text="（非 16:9 封面会等比缩放并补黑边）", bg="#1E1E1E", fg="#777777",
-                 font=("Microsoft YaHei", 8)).pack(side="left", padx=6)
-
-        # --- 语音识别 / 降噪 ---
-        row5 = tk.Frame(control, bg="#1E1E1E")
-        row5.pack(fill="x", pady=(8, 2))
+        self.cmb_lang.pack(side="left", padx=(4, 16))
+        self.cmb_lang.bind("<<ComboboxSelected>>", lambda _e: self._persist())
         self.chk_stt = tk.Checkbutton(
-            row5, text="🎧 识别语音并生成字幕（.srt + .txt）", variable=self.stt_var,
-            command=self._on_stt_toggle, bg="#1E1E1E", fg="#CCCCCC",
-            selectcolor="#2D2D30", activebackground="#1E1E1E", activeforeground="white",
+            opt_row1, text="同时生成字幕（.srt + .txt）", variable=self.stt_var,
+            command=self._on_stt_toggle, bg="#252526", fg="#CCCCCC",
+            selectcolor="#2D2D30", activebackground="#252526", activeforeground="white",
             font=("Microsoft YaHei", 9, "bold"), anchor="w",
         )
         self.chk_stt.pack(side="left")
-        tk.Label(row5, text="识别模型：", bg="#1E1E1E", fg="#CCCCCC",
-                 font=("Microsoft YaHei", 9)).pack(side="left", padx=(18, 0))
-        self.cmb_model = ttk.Combobox(row5, textvariable=self.stt_model_var, state="readonly",
-                                      values=list(STT_MODELS.keys()), width=30,
-                                      font=("Microsoft YaHei", 9))
-        self.cmb_model.pack(side="left", padx=6)
-        self.cmb_model.bind("<<ComboboxSelected>>", lambda _e: self._persist())
 
-        row6 = tk.Frame(control, bg="#1E1E1E")
-        row6.pack(fill="x", pady=(2, 0))
-        tk.Label(row6, text="识别语种：", bg="#1E1E1E", fg="#CCCCCC",
-                 font=("Microsoft YaHei", 9)).pack(side="left", padx=(28, 0))
-        self.cmb_lang = ttk.Combobox(row6, textvariable=self.stt_lang_var, state="readonly",
-                                     values=list(STT_LANGS.keys()), width=18,
-                                     font=("Microsoft YaHei", 9))
-        self.cmb_lang.pack(side="left", padx=6)
-        self.cmb_lang.bind("<<ComboboxSelected>>", lambda _e: self._persist())
-        tk.Label(row6, text="降噪：", bg="#1E1E1E", fg="#CCCCCC",
-                 font=("Microsoft YaHei", 9)).pack(side="left", padx=(14, 0))
-        self.cmb_denoise = ttk.Combobox(row6, textvariable=self.denoise_var, state="readonly",
-                                        values=list(DENOISE_MODES.keys()), width=24,
+        opt_row2 = tk.Frame(opt_frame, bg="#252526")
+        opt_row2.pack(fill="x", padx=10, pady=4)
+        tk.Label(opt_row2, text="降噪：", bg="#252526", fg="#CCCCCC",
+                 font=("Microsoft YaHei", 9)).pack(side="left")
+        self.cmb_denoise = ttk.Combobox(opt_row2, textvariable=self.denoise_var, state="readonly",
+                                        values=list(DENOISE_MODES.keys()), width=22,
                                         font=("Microsoft YaHei", 9))
-        self.cmb_denoise.pack(side="left", padx=6)
+        self.cmb_denoise.pack(side="left", padx=(4, 16))
         self.cmb_denoise.bind("<<ComboboxSelected>>", lambda _e: self._persist())
-        tk.Label(row6, text="（降噪只用于识别，不改动成片音轨）", bg="#1E1E1E", fg="#777777",
+        tk.Label(opt_row2, text="输出尺寸：", bg="#252526", fg="#CCCCCC",
+                 font=("Microsoft YaHei", 9)).pack(side="left")
+        self.cmb_size = ttk.Combobox(opt_row2, textvariable=self.size_var, state="readonly",
+                                     values=list(SIZE_MODES.keys()), width=24,
+                                     font=("Microsoft YaHei", 9))
+        self.cmb_size.pack(side="left", padx=(4, 6))
+        self.cmb_size.bind("<<ComboboxSelected>>", lambda _e: self._persist())
+        tk.Label(opt_row2, text="（非 16:9 封面会等比缩放并补黑边）", bg="#252526", fg="#777777",
                  font=("Microsoft YaHei", 8)).pack(side="left", padx=6)
 
         # --- 执行区 ---
-        exec_frame = tk.Frame(self.root, bg="#1E1E1E")
+        exec_frame = tk.Frame(self.root, bg="#252526", highlightbackground="#3C3C3C",
+                              highlightthickness=1)
         exec_frame.pack(fill="x", padx=20, pady=(0, 8))
-        self.btn_start = tk.Button(exec_frame, text="4. ▶ 开始批量转换", font=("Microsoft YaHei", 12, "bold"),
-                                   bg="#10B981", fg="white", activebackground="#059669",
-                                   activeforeground="white", relief="flat", width=24,
-                                   command=self.start_processing)
-        self.btn_start.pack(side="left")
-        self.btn_cancel = tk.Button(exec_frame, text="■ 取消", font=("Microsoft YaHei", 10, "bold"),
-                                    bg="#B91C1C", fg="white", activebackground="#991B1B",
-                                    activeforeground="white", relief="flat", width=10,
-                                    state=tk.DISABLED, command=self.cancel_processing)
-        self.btn_cancel.pack(side="left", padx=10)
-        tk.Label(exec_frame, textvariable=self.stage_var, bg="#1E1E1E", fg="#A9A9A9",
-                 font=("Microsoft YaHei", 9)).pack(side="left", padx=12)
+
+        tk.Label(exec_frame, text="执行", bg="#252526", fg="#CCCCCC", anchor="w",
+                 font=("Microsoft YaHei", 9, "bold")).pack(fill="x", padx=10, pady=(6, 0))
+
+        cards = tk.Frame(exec_frame, bg="#252526")
+        cards.pack(fill="x", padx=6, pady=(6, 2))
+
+        self.btn_start_subtitle = tk.Button(
+            cards, text="① 只出字幕\n不生成视频，只要文字稿",
+            font=("Microsoft YaHei", 10, "bold"), bg="#3A3A3A", fg="#808080",
+            activebackground="#3A3A3A", activeforeground="#808080",
+            disabledforeground="#808080", relief="flat", height=3, width=16,
+            cursor="hand2", command=self.start_subtitle_only)
+        self.btn_start_subtitle.pack(side="left", padx=6, expand=True)
+
+        self.btn_start = tk.Button(
+            cards, text="② 原声转 MP4\n用原始音频配图",
+            font=("Microsoft YaHei", 10, "bold"), bg="#10B981", fg="white",
+            activebackground="#059669", activeforeground="white",
+            disabledforeground="#D1D5DB", relief="flat", height=3, width=16,
+            cursor="hand2", command=self.start_processing)
+        self.btn_start.pack(side="left", padx=6, expand=True)
+
+        self.btn_start_denoised = tk.Button(
+            cards, text="③ 降噪转 MP4\n降噪后配图封装",
+            font=("Microsoft YaHei", 10, "bold"), bg="#3A3A3A", fg="#808080",
+            activebackground="#3A3A3A", activeforeground="#808080",
+            disabledforeground="#808080", relief="flat", height=3, width=16,
+            cursor="hand2", command=self.start_denoised_mux)
+        self.btn_start_denoised.pack(side="left", padx=6, expand=True)
+
+        bar_row = tk.Frame(exec_frame, bg="#252526")
+        bar_row.pack(fill="x", padx=10, pady=(8, 4))
 
         style = ttk.Style(self.root)
         try:
@@ -875,14 +912,22 @@ class AudioToVideoApp:
             pass
         style.configure("Zoo.Horizontal.TProgressbar", troughcolor="#2D2D30",
                         background="#10B981", thickness=16)
-        self.progress = ttk.Progressbar(self.root, variable=self.progress_var, maximum=100.0,
+        self.progress = ttk.Progressbar(bar_row, variable=self.progress_var, maximum=100.0,
                                         style="Zoo.Horizontal.TProgressbar")
-        self.progress.pack(fill="x", padx=20, pady=(0, 10))
+        self.progress.pack(side="left", fill="x", expand=True)
+        self.btn_cancel = tk.Button(bar_row, text="■ 取消", font=("Microsoft YaHei", 10, "bold"),
+                                    bg="#B91C1C", fg="white", activebackground="#991B1B",
+                                    activeforeground="white", relief="flat", width=10,
+                                    state=tk.DISABLED, command=self.cancel_processing)
+        self.btn_cancel.pack(side="left", padx=(10, 0))
+
+        tk.Label(exec_frame, textvariable=self.stage_var, bg="#252526", fg="#A9A9A9",
+                 font=("Microsoft YaHei", 9), anchor="w").pack(fill="x", padx=10, pady=(0, 6))
 
         # --- 日志区 ---
         self.text_area = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, font=("Consolas", 10),
                                                    bg="#0C0C0C", fg="#4AF626", padx=10, pady=10,
-                                                   borderwidth=0)
+                                                   borderwidth=0, height=12)
         self.text_area.pack(fill="both", expand=True, padx=20, pady=(0, 20))
         self.text_area.tag_config("error", foreground="#FF4500")
         self.text_area.tag_config("info", foreground="#5CB3FF")
@@ -1007,11 +1052,14 @@ class AudioToVideoApp:
         for button in (self.btn_audio, self.btn_img, self.btn_dir, self.btn_engine,
                        self.btn_redetect, self.cmb_size, self.chk_stt):
             button.config(state=state)
+        # 三张动作卡：卡①③ 为占位功能，锁定/解锁同样跟随处理状态
+        for button in (self.btn_start_subtitle, self.btn_start_denoised):
+            button.config(state=state)
         if locked:
             self.btn_start.config(state=tk.DISABLED, text="⏳ 正在处理...")
             self.btn_cancel.config(state=tk.NORMAL)
         else:
-            self.btn_start.config(state=tk.NORMAL, text="4. ▶ 开始批量转换")
+            self.btn_start.config(state=tk.NORMAL, text="② 原声转 MP4\n用原始音频配图")
             self.btn_cancel.config(state=tk.DISABLED)
         self._sync_stt_state()
 
@@ -1062,6 +1110,17 @@ class AudioToVideoApp:
                 proc.terminate()
             except Exception:
                 pass
+
+    # ---------- 占位动作（阶段 2 接入真实逻辑） ----------
+    def start_subtitle_only(self):
+        msg = "该功能将在下一阶段接入，当前请使用「② 原声转 MP4」。"
+        self.log(f">>> {msg}\n")
+        messagebox.showinfo("功能开发中", msg)
+
+    def start_denoised_mux(self):
+        msg = "该功能将在下一阶段接入，当前请使用「② 原声转 MP4」。"
+        self.log(f">>> {msg}\n")
+        messagebox.showinfo("功能开发中", msg)
 
     def _run_stt(self, audio_path, out_path, model_name, lang, denoise_mode,
                  duration, index, total, base_name):
